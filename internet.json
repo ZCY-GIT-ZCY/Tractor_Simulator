@@ -1,0 +1,8 @@
+{
+  "mode": "quick",
+  "port": 8765,
+  "max_rooms": 32,
+  "protocol": "http2",
+  "public_url": "",
+  "token_file": "runtime/tunnel-token.txt"
+}

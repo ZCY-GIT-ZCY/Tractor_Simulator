@@ -1,0 +1,16 @@
+{
+  "url": "http://127.0.0.1:43021",
+  "four_seats": true,
+  "private_hands": true,
+  "fifth_rejected": true,
+  "turn_ownership": true,
+  "stale_rejected": true,
+  "synchronized_after_action": true,
+  "reconnect_same_seat": true,
+  "package_files": 38,
+  "manifest_verified": true,
+  "bundled_rules_exact": true,
+  "zip_sha256": "76cac0de7ace1150b28bae0bde82875f76cbdde0ff3c223a0e4224b547953bd9",
+  "stop_script_verified": true,
+  "tunnel_child_cleanup_verified": true
+}

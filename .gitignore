@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+docs/run.json
+runtime/
+dependencies/
+.venv/
+*.log
+*.pid
+.env
+.env.*
+internet.local.json
+*-token.txt
+*.pem
