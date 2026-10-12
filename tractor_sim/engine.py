@@ -46,8 +46,11 @@ class TractorEnv:
     def reset(self, seed=None):
         self.seed = seed
         self.rng = random.Random(seed)
+        self.turn_direction = -1  # Fixed seats: south 0 -> east 3 -> north 2 -> west 1.
         self.levels = [self.config.initial_level] * 2
-        self.passed = [set(r for r in MANDATORY if r < self.config.initial_level) for _ in range(2)]
+        # Only a completed defending hand earns credit; choosing an initial
+        # level never invents defending history for either partnership.
+        self.passed = [set(), set()]
         self.banker = self.config.banker
         self.round_no = 0
         self.redeals = 0
@@ -60,7 +63,10 @@ class TractorEnv:
         return self.observe(self.current_player)
 
     def _event(self, kind, **data):
-        self.events.append({"seq": len(self.events), "round": self.round_no, "type": kind, **data})
+        event = {"seq": len(self.events), "round": self.round_no, "type": kind, **data}
+        self.events.append(event)
+        if kind in ("bid", "kitty_picked_up", "kitty_buried", "play", "throw_failed"):
+            self.public_history.append(event)
 
     def _start_round(self, auction=False, redeal=False):
         if not redeal:
@@ -70,6 +76,7 @@ class TractorEnv:
         self.trump = None
         self.bid = None
         self.bid_history = []
+        self.public_history = []
         self.hands = [[], [], [], []]
         self.deck = list(range(108)); self.rng.shuffle(self.deck)
         self.kitty = self.deck[100:]
@@ -91,8 +98,15 @@ class TractorEnv:
                     redeal=redeal)
         self._deal_one()
 
+    def next_seat(self, player, steps=1):
+        return (player + self.turn_direction * steps) % 4
+
+    def _initial_bottom_owner(self):
+        # Outside the opening auction, the original bottom belongs to banker.
+        return self.bid['player'] if self.auction and self.bid and len(self.bid_history) > 1 else self.banker
+
     def _deal_one(self):
-        player = (self.deal_start + self.deal_count) % 4
+        player = self.next_seat(self.deal_start, self.deal_count)
         self.hands[player].append(self.deck[self.deal_count])
         self.deal_count += 1
         self.current_player = player
@@ -100,10 +114,11 @@ class TractorEnv:
     def _finish_dealing(self):
         if self.bid:
             if self.bid["strength"] == 4:
-                self._pickup(self.banker)
+                self._pickup(self._initial_bottom_owner())
             else:
                 self.phase = "final_bidding"
-                self.final_bid_queue = [(self.banker + i) % 4 for i in range(4)]
+                self.final_bid_queue = [self.next_seat(self.banker, i) for i in range(4)
+                                        if self.bid['strength'] == 1 or self.next_seat(self.banker, i) != self.bid['player']]
                 self.current_player = self.final_bid_queue[0]
                 self._event("final_bidding_started", player=self.current_player)
         elif self.auction:
@@ -138,8 +153,8 @@ class TractorEnv:
     def _begin_countering(self, owner):
         """Ask the other seats once in order; nobody counters their own bid."""
         self.counter_passes = 0
-        self.counter_queue = [(owner + offset) % 4 for offset in range(1, 4)
-                              if (owner + offset) % 4 != self.bid["player"]]
+        self.counter_queue = [self.next_seat(owner, offset) for offset in range(1, 4)
+                              if self.next_seat(owner, offset) != self.bid["player"]]
         if self.bid["strength"] == 4 or not self.counter_queue:
             self._begin_play()
         else:
@@ -177,9 +192,10 @@ class TractorEnv:
     def _validate(self, action, player):
         if not isinstance(action, dict):
             raise IllegalAction("ACTION", "动作须为对象")
-        if type(player) is not int or player != self.current_player:
-            raise IllegalAction("NOT_YOUR_TURN", "还没轮到你")
         kind = action.get("type")
+        realtime_bid = self.phase == 'dealing' and kind == 'bid'
+        if type(player) is not int or player not in range(4) or (player != self.current_player and not realtime_bid):
+            raise IllegalAction("NOT_YOUR_TURN", "还没轮到你")
         if self.phase == "match_end":
             raise IllegalAction("MATCH_FINISHED", "比赛已结束，请新建对局")
         if self.phase == "round_end":
@@ -197,11 +213,16 @@ class TractorEnv:
                 raise IllegalAction("BOTTOM_OWNER_COUNTER", "刚扣底的玩家不能接着反底")
             cards = self._selected(action, player)
             strength = self._bid_strength(cards)
+            if self.bid and player == self.bid['player']:
+                reinforcement = (self.phase != 'countering' and self.bid['strength'] == 1
+                                 and strength == 2 and face(cards[0]) == face(self.bid['cards'][0]))
+                if not reinforcement:
+                    raise IllegalAction('SELF_COUNTER', '不能反自己当前亮出或反出的主；单张级牌只可加固为同花色级牌对')
             if not self.bid and strength >= 3:
                 raise IllegalAction("FIRST_BID_JOKER", "首次不能用王亮无主，须先亮级牌")
             if self.bid and strength <= self.bid["strength"]:
                 raise IllegalAction("BID_TOO_WEAK", "反主须严格高于当前亮主强度")
-            return {"valid": True, "kind": "bid", "message": "可以亮牌", "strength": strength}
+            return {"valid": True, "kind": "bid", "message": "可以加固" if self.bid and player == self.bid['player'] else "可以亮主／反主", "strength": strength}
         cards = self._selected(action, player)
         if self.phase == "burying":
             if kind != "bury" or len(cards) != 8:
@@ -227,24 +248,35 @@ class TractorEnv:
             was_final = self.phase == "final_bidding"
             if kind == "bid":
                 cards = action["cards"][:]
+                first_bid = self.bid is None
                 self.bid = {"player": player, "strength": validated["strength"], "cards": cards}
                 self.bid_history.append(copy.deepcopy(self.bid))
                 self.trump = suit(cards[0]) if rank(cards[0]) < 15 else None
-                if (was_dealing or was_final) and self.auction:
+                if (was_dealing or was_final) and self.auction and (first_bid or self.level == 2):
                     self.banker = player
                 self._event("bid", **self.bid, trump=self.trump, banker=self.banker)
                 if not was_dealing:
                     self.counter_passes = 0
                     self.counter_queue = []
-                    self._pickup(player)
-            if was_dealing:
+                    if was_final and self.auction and self.level == 2 and self.bid['strength'] < 4:
+                        # A level-2 auction stays open after reinforcement or
+                        # a counter: all three other players may still raise.
+                        self.final_bid_queue = [self.next_seat(player, i) for i in range(1, 4)]
+                        self.current_player = self.final_bid_queue[0]
+                        self._event('final_bidding_continued', player=self.current_player,
+                                    banker=self.banker, strength=self.bid['strength'])
+                    else:
+                        # Normal pre-bottom counters change trump, not ownership.
+                        # Post-burial counters receive the latest actual kitty.
+                        self._pickup(self.banker if was_final and not self.auction else player)
+            if was_dealing and kind == 'pass':
                 self._deal_one() if self.deal_count < 100 else self._finish_dealing()
             elif was_final and kind == "pass":
                 self.final_bid_queue.pop(0)
                 if self.final_bid_queue:
                     self.current_player = self.final_bid_queue[0]
                 else:
-                    self._pickup(self.banker)
+                    self._pickup(self._initial_bottom_owner())
             elif kind == "pass":
                 self.counter_passes += 1
                 self.counter_queue.pop(0)
@@ -286,7 +318,7 @@ class TractorEnv:
         self.trick.append({"player": player, "cards": cards[:]})
         self._event("play", player=player, cards=cards[:])
         if len(self.trick) < 4:
-            self.current_player = (player + 1) % 4
+            self.current_player = self.next_seat(player)
             return
         winner = self._trick_winner()
         trick_points = sum(points(c) for play in self.trick for c in play["cards"])
@@ -326,6 +358,8 @@ class TractorEnv:
     def _advance(self, team, amount):
         start = self.levels[team]
         target = min(14, start + amount)
+        # Include start itself: gaining the table at 2/5/... does not count
+        # as having played that level as defenders and cannot move past it.
         for r in sorted(MANDATORY):
             if start <= r <= target and r not in self.passed[team]:
                 return r
@@ -338,8 +372,8 @@ class TractorEnv:
         winning_cards = next(p["cards"] for p in self.last_trick["plays"] if p["player"] == winner)
         multiplier = 0
         if winner % 2 == attack:
-            from collections import Counter
-            p = sum(n // 2 for n in Counter(map(face, winning_cards)).values())
+            lead = self.last_trick['plays'][0]['cards']
+            p = sum(unit['pairs'] for unit in components(lead, self.level, self.trump))
             multiplier = 2 ** (p + 1)
             self.bottom_score = sum(points(c) for c in self.kitty) * multiplier
             self.score += self.bottom_score
@@ -348,21 +382,24 @@ class TractorEnv:
         defending_won = self.score < 80
         upgrading = defense if defending_won else attack
         amount = (3 if self.score <= 0 else 2 if self.score < 40 else 1) if defending_won else self.score // 40 - 2
+        target = min(14, self.levels[upgrading] + amount)
         self.levels[upgrading] = self._advance(upgrading, amount)
+        mandatory_stop = self.levels[upgrading] if self.levels[upgrading] < target else None
         downgrade = None
         if winner % 2 == attack and self.level in (11, 14) and any(rank(c) == self.level for c in winning_cards):
             downgrade = 2 if self.level == 11 else 11
             self.levels[defense] = downgrade  # permanent mandatory records are preserved
         if self.level == 14 and defending_won and downgrade is None:
             self.match_winner = defense
-        next_banker = (banker + 2) % 4 if defending_won else (banker + 1) % 4
+        next_banker = self.next_seat(banker, 2 if defending_won else 1)
         self.result = {"round": self.round_no, "level": self.level, "banker": banker,
                        "score": self.score, "captured": self.captured_score, "penalty": self.penalty_score,
                        "bottom": self.bottom_score, "multiplier": multiplier,
                        "kitty": self.kitty[:] if self.kitty_public else None,
                        "winner": defense if defending_won else attack, "last_winner": winner,
                        "levels_before": old_levels, "levels_after": self.levels[:], "upgrade": amount,
-                       "upgrading_team": upgrading, "downgrade": downgrade, "next_banker": next_banker,
+                       "upgrading_team": upgrading, "mandatory_stop": mandatory_stop,
+                       "downgrade": downgrade, "next_banker": next_banker,
                        "match_winner": self.match_winner}
         self._event("round_ended", **self.result)
         self.phase = "match_end" if self.match_winner is not None else "round_end"
@@ -387,6 +424,7 @@ class TractorEnv:
             raise ValueError("观察座位须为 0..3")
         obs = {"schema_version": SCHEMA_VERSION, "revision": self.revision, "round": self.round_no,
                "phase": self.phase, "player": player, "current_player": self.current_player,
+               "turn_direction": self.turn_direction, "realtime_bidding": True,
                "level": self.level, "level_label": LABELS[self.level], "levels": self.levels[:],
                "passed_levels": [sorted(s) for s in self.passed], "auction": self.auction,
                "banker": None if self.phase == "dealing" and self.auction and not self.bid else self.banker,
@@ -404,7 +442,9 @@ class TractorEnv:
                "captured_score": self.captured_score, "penalty_score": self.penalty_score,
                "bottom_score": self.bottom_score, "result": copy.deepcopy(self.result),
                "match_winner": self.match_winner, "events": copy.deepcopy(self.events[-80:]),
-               "bid_options": self.bid_options(player) if player == self.current_player and self.phase in ("dealing", "final_bidding", "countering") else [],
+               "public_history": copy.deepcopy(self.public_history),
+               "played_cards": self.played[:],
+               "bid_options": self.bid_options(player) if self.phase == 'dealing' or player == self.current_player and self.phase in ("final_bidding", "countering") else [],
                "action_types": {"dealing": ["bid", "pass"], "final_bidding": ["bid", "pass"], "countering": ["bid", "pass"],
                                 "burying": ["bury"], "playing": ["play"], "round_end": ["next_round"],
                                 "match_end": []}[self.phase]}
@@ -422,7 +462,11 @@ class TractorEnv:
     def iter_legal_actions(self, player=None):
         """Lazy exhaustive actions. Enumeration may be expensive; never silently caps."""
         player = self.current_player if player is None else player
-        if player != self.current_player or self.phase == "match_end":
+        if type(player) is not int or player not in range(4) or self.phase == 'match_end':
+            return
+        if player != self.current_player:
+            if self.phase == 'dealing':
+                yield from self.bid_options(player)
             return
         if self.phase == "round_end":
             yield {"type": "next_round"}; return
@@ -457,6 +501,14 @@ class TractorEnv:
         env = cls.__new__(cls)
         env.config = GameConfig(**state["config"])
         env.__dict__.update(copy.deepcopy({k: v for k, v in state.items() if k not in ("schema_version", "config", "rng_state", "passed")}))
+        # Old saved checkpoints retain their recorded direction; new reset()
+        # games always use the current counterclockwise rule.
+        if not hasattr(env, 'turn_direction'):
+            env.turn_direction = 1
+        if not hasattr(env, "public_history"):
+            start = max((i for i, e in enumerate(env.events) if e["type"] == "round_started"), default=0)
+            env.public_history = [e for e in env.events[start:] if e["type"] in
+                                  ("bid", "kitty_picked_up", "kitty_buried", "play", "throw_failed")]
         env.passed = list(map(set, state["passed"]))
         if not hasattr(env, "final_bid_queue"):
             env.final_bid_queue = []
@@ -466,10 +518,10 @@ class TractorEnv:
             env.counter_queue = []
             if env.phase == "countering":
                 owner = env.kitty_owner
-                start = (env.current_player - owner) % 4
+                start = ((env.current_player - owner) * env.turn_direction) % 4
                 offsets = range(start or 1, 4) if start or env.counter_passes == 0 else ()
-                env.counter_queue = [(owner + offset) % 4 for offset in offsets
-                                     if (owner + offset) % 4 != env.bid["player"]]
+                env.counter_queue = [env.next_seat(owner, offset) for offset in offsets
+                                     if env.next_seat(owner, offset) != env.bid["player"]]
                 if env.bid["strength"] == 4 or not env.counter_queue:
                     env._begin_play()
                 else:
@@ -495,6 +547,7 @@ class TractorEnv:
         assert len(cards) == 108 and set(cards) == set(range(108)), "实体牌不守恒"
         assert self.score == self.captured_score + self.penalty_score + self.bottom_score
         assert self.current_player in range(4)
+        assert self.turn_direction in (-1, 1)
         if self.phase == "final_bidding":
             assert self.final_bid_queue and self.current_player == self.final_bid_queue[0]
             assert self.deal_count == 100 and len(self.kitty) == 8

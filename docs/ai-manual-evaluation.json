@@ -1,0 +1,49 @@
+{
+  "mode": "PVE",
+  "human_seat": 0,
+  "controls": "own hand only; no autoplay/random-play; auto-deal passes only",
+  "complete_games": 2,
+  "games": [
+    {
+      "level": 6,
+      "trump": null,
+      "banker": 0,
+      "human_team_role": "defense",
+      "tricks": 17,
+      "score": 20,
+      "captured": 20,
+      "bottom": 0,
+      "penalty": 0,
+      "levels_before": [
+        6,
+        6
+      ],
+      "levels_after": [
+        8,
+        6
+      ],
+      "next_banker": 2
+    },
+    {
+      "level": 11,
+      "trump": "D",
+      "banker": 1,
+      "human_team_role": "attack",
+      "tricks": 14,
+      "score": 30,
+      "captured": 30,
+      "bottom": 0,
+      "penalty": 0,
+      "levels_before": [
+        11,
+        11
+      ],
+      "levels_after": [
+        11,
+        13
+      ],
+      "next_banker": 3
+    }
+  ],
+  "coverage": "manual observations and screenshots, not a complete deterministic replay"
+}

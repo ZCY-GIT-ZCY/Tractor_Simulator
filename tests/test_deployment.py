@@ -39,13 +39,15 @@ server = TractorServer(('127.0.0.1', 0))
 thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
 try:
     url = f'http://127.0.0.1:{server.server_port}'
-    for name in ('/', '/app.js', '/style.css', '/rules'):
+    for name in ('/', '/app.js', '/hand-layout.js', '/style.css', '/seating.css', '/table-review.css', '/history.html', '/history.js', '/history.css', '/replay-clock.js', '/rules'):
         with urllib.request.urlopen(url + name, timeout=5) as reply:
             content = reply.read()
             assert reply.status == 200 and content
             if name == '/rules': assert content == next(Path('rules').glob('*.md')).read_bytes()
     with urllib.request.urlopen(url + '/api/health', timeout=5) as reply:
         assert json.load(reply)['service'] == 'tractor_sim'
+    with urllib.request.urlopen(url + '/api/history', timeout=5) as reply:
+        assert json.load(reply)['records'] == []
 finally:
     server.shutdown(); server.server_close(); thread.join(2)
 print('isolated source deployment OK')

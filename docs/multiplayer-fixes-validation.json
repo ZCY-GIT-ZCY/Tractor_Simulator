@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-12",
+  "python_tests": {"passed": 129, "failed": 0},
+  "node_tests": {"passed": 55, "failed": 0},
+  "browser": {
+    "service": "isolated localhost:8766",
+    "room": "QA_MULTIPLAYER",
+    "mode": "pvp",
+    "human_seats": [0, 1, 2, 3],
+    "controlled_deck": true,
+    "normal_http_actions": true,
+    "level_draw_pause": {"level": 2, "deal_count": 8, "auto_deal_enabled": false},
+    "joker_pair_pause": {"rank": "small joker", "deal_count": 16, "auto_deal_enabled": false},
+    "preselection": {
+      "while_other_player_leads": true,
+      "retained_after_three_plays": true,
+      "revalidated_on_own_turn": true,
+      "explicit_submit": true,
+      "own_hand_after_submit": 24,
+      "following_trick_preselection": true
+    },
+    "mobile": {"viewport": [390, 844], "client_width": 375, "scroll_width": 375},
+    "console_errors": [],
+    "console_warnings": []
+  },
+  "rule_regressions": {
+    "pre_bottom_banking": "only level-2 auction counters transfer banking; first auction bid still selects banker",
+    "bottom_after_burial": "last actual eight buried cards",
+    "mandatory_levels": [2, 5, 10, 11, 13, 14],
+    "attacking_scores": [120, 160, 200],
+    "initial_level_creates_defending_history": false,
+    "played_history_survives_downgrade": true
+  },
+  "full_hand_mandatory_two": {
+    "seed": 1,
+    "config": {"initial_level": 2, "auction": false, "banker": 0},
+    "policy": "RandomPolicy(seed=1)",
+    "steps": 203,
+    "score": 130,
+    "nominal_upgrade": 1,
+    "levels_before": [2, 2],
+    "levels_after": [2, 2],
+    "passed_levels": [[2], []],
+    "mandatory_stop": 2,
+    "next_banker": 1
+  },
+  "screenshots": ["multiplayer-preselection.png", "multiplayer-preselection-mobile.png", "auto-deal-paused.png"]
+}

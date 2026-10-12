@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-12",
+  "python_tests": 160,
+  "node_tests": 72,
+  "real_time_grace_seconds": 6,
+  "production_service_untouched": true,
+  "temporary_service_closed": true,
+  "browser_windows": [
+    {
+      "seconds": 6.051,
+      "phase": "dealing",
+      "bid": null,
+      "redeals": 1,
+      "deal_count": 1
+    },
+    {
+      "seconds": 6.029,
+      "phase": "final_bidding",
+      "bid": {
+        "player": 0,
+        "strength": 1,
+        "cards": [
+          13
+        ]
+      },
+      "redeals": 0,
+      "deal_count": 100
+    },
+    {
+      "seconds": 6.005,
+      "phase": "dealing",
+      "bid": null,
+      "redeals": 1,
+      "deal_count": 1
+    },
+    {
+      "seconds": 6.065,
+      "phase": "dealing",
+      "bid": null,
+      "redeals": 1,
+      "deal_count": 1
+    }
+  ],
+  "bottom_fixture": {
+    "lead": "six distinct nontrump singles",
+    "winner": "three-pair trump tractor",
+    "expected_multiplier": 2,
+    "actual_multiplier": 2
+  },
+  "async_checks": [
+    "stronger bids accepted with older snapshots",
+    "equal later bids rejected atomically",
+    "bids do not restart countdown",
+    "early pass cannot close window",
+    "deadline close runs once",
+    "offturn AI can bid during grace",
+    "late AI decisions discarded",
+    "pause resumes remaining time",
+    "late validation cannot enable submit"
+  ],
+  "mobile": {
+    "viewport": [
+      390,
+      844
+    ],
+    "document_width": 375,
+    "draw_button_hidden": true,
+    "console_errors": 0
+  }
+}

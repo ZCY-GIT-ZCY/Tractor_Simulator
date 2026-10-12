@@ -1,0 +1,16 @@
+{
+  "no_bid_fixtures": 2,
+  "counter_fixtures": 2,
+  "terminal_fixtures": 23,
+  "structure_fixtures": 1,
+  "aggressive_complete_rounds": 12,
+  "checks": {
+    "actions": 2710,
+    "bids": 26,
+    "burials": 19,
+    "plays": 1024,
+    "tricks": 256,
+    "failed_throws": 199
+  },
+  "oracle": "tools.evaluate_ai; no tractor_sim.rules imports"
+}

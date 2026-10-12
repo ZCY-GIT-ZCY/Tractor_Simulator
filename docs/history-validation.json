@@ -1,0 +1,58 @@
+{
+  "complete_web_round": true,
+  "steps": 201,
+  "filename": "打J_2026-10-11_23-04-54-376932_aeefa9c9.json",
+  "replay_id": "aeefa9c9736605536bca96deb5fa2a85",
+  "record_count": 33,
+  "exact_final_result": true,
+  "hidden_bottom_redacted": true,
+  "burials_redacted": true,
+  "result": {
+    "round": 1,
+    "level": 11,
+    "banker": 0,
+    "score": 130,
+    "captured": 120,
+    "penalty": 0,
+    "bottom": 10,
+    "multiplier": 2,
+    "kitty": null,
+    "winner": 1,
+    "last_winner": 1,
+    "levels_before": [
+      11,
+      11
+    ],
+    "levels_after": [
+      2,
+      11
+    ],
+    "upgrade": 1,
+    "upgrading_team": 1,
+    "downgrade": 2,
+    "next_banker": 1,
+    "match_winner": null
+  },
+  "browser": {
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "manual_next": true,
+    "autoplay_5x_completed": "184 / 184",
+    "stopped_at_end": true,
+    "continuous_mobile_speed": 0.21,
+    "mobile_interval_label": "每 4.76 秒一步",
+    "mobile_client_width": 375,
+    "mobile_scroll_width": 375,
+    "level_J_filter_records": 5
+  },
+  "tests": {
+    "python": 108,
+    "frontend": 36
+  }
+}

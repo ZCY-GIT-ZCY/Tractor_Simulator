@@ -48,6 +48,7 @@ def main():
     parser.add_argument("--full-match", action="store_true", help="每个 episode 为完整升级比赛")
     parser.add_argument("--output", type=Path, help="保存 JSON 统计与可重放初始种子、动作日志")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--history-dir", type=Path, help="网页回放存储目录，默认项目 runtime/history")
     parser.add_argument("--replay", type=Path, help="校验 --output 保存的 JSON 中全部 episode")
     args = parser.parse_args()
     if args.replay:
@@ -62,7 +63,7 @@ def main():
         browser_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
         url = f"http://{browser_host}:{args.port}"
         try:
-            server = TractorServer((args.host, args.port), verbose=args.verbose)
+            server = TractorServer((args.host, args.port), verbose=args.verbose, history_dir=args.history_dir)
         except OSError as exc:
             occupied = exc.errno == errno.EADDRINUSE or getattr(exc, "winerror", None) in (10048, 10013)
             if occupied and existing_tractor(url, args.host):

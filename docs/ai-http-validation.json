@@ -1,0 +1,44 @@
+{
+  "policy": "enoch-table-v1",
+  "human_seat": 0,
+  "human_actions": 46,
+  "phases": [
+    "burying",
+    "countering",
+    "dealing",
+    "final_bidding",
+    "playing",
+    "round_end"
+  ],
+  "three_server_bots": true,
+  "private_hands": true,
+  "search_seen": true,
+  "max_http_ms": 212.77,
+  "seconds": 82.29,
+  "result": {
+    "round": 1,
+    "level": 11,
+    "banker": 0,
+    "score": 250,
+    "captured": 130,
+    "penalty": 0,
+    "bottom": 120,
+    "multiplier": 4,
+    "kitty": null,
+    "winner": 1,
+    "last_winner": 1,
+    "levels_before": [
+      11,
+      11
+    ],
+    "levels_after": [
+      2,
+      11
+    ],
+    "upgrade": 4,
+    "upgrading_team": 1,
+    "downgrade": 2,
+    "next_banker": 1,
+    "match_winner": null
+  }
+}

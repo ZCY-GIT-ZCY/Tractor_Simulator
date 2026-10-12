@@ -1,0 +1,36 @@
+/* Declarations live in front of their seat until play starts. */
+.declaration-label{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);color:#eadba8;font-size:10px;white-space:nowrap;letter-spacing:.5px}
+.play.declaration .card{box-shadow:0 3px 12px #061e2645;outline:1px solid #e4cd8560}
+.play.declaration.south .declaration-label{top:-20px}
+.bid-notice{position:fixed;right:24px;top:84px;z-index:12;display:flex;align-items:center;gap:14px;max-width:calc(100vw - 32px);padding:17px 22px;background:#fffcf3;border:1px solid #d9d1b9;border-radius:14px;box-shadow:0 8px 36px #173d3526;pointer-events:none;animation:notice-in .25s ease-out}
+.bid-notice-icon{font-size:35px;color:#244d3e}.bid-notice-icon.red{color:#bb474c}
+.bid-notice strong{display:block;font-size:14px;color:#294637;overflow-wrap:anywhere}.bid-notice small{display:block;margin-top:7px;color:#7c8773;font-size:12px}
+@keyframes notice-in{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+/* A separate strip inside the table preserves every card in the final trick. */
+.table-surface.reviewing{min-height:530px}
+.reviewing .seat.south{bottom:147px}
+.reviewing .play.south,.self-view.reviewing .play.south{bottom:197px}
+.reviewing .table-status{display:none}
+.settlement-bottom{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);z-index:4;width:max-content;max-width:calc(100% - 32px);text-align:center;border-top:1px solid #e5e6ce26;padding-top:13px}
+.settlement-bottom>span{display:block;color:#e4d4a4;font-size:11px;letter-spacing:2px;margin-bottom:10px}
+.settlement-cards{display:flex;justify-content:center;gap:5px}
+.settlement-cards .card{width:42px;min-width:42px;height:64px;border-radius:5px}
+.settlement-cards .corner{left:4px;top:5px;font-size:12px}.settlement-cards .corner span{font-size:12px}
+.settlement-cards .card-center,.settlement-cards .corner.bottom{display:none}
+.settlement-panel{display:flex;gap:18px;align-items:center;justify-content:space-between;margin-top:16px;padding:18px 20px;background:#edf1e7;border:1px solid #dbe2d1;border-radius:12px;color:#294638}
+.play-area:has(.settlement-panel:not([hidden])) .hand-heading,.play-area:has(.settlement-panel:not([hidden])) .hand-region,.play-area:has(.settlement-panel:not([hidden])) .action-bar{display:none}
+.review-heading{font-size:13px;font-weight:600}.review-heading small{margin-left:10px;font-weight:400;color:#7e8877;font-size:11px}
+.score-equation{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:12px 0 7px;font-size:12px}.score-equation i{font-style:normal;color:#8c987f}.score-equation b{font-weight:600}.score-total{font-size:18px;color:#1d503d}
+.settlement-formula>small{font-size:10px;color:#7b8873;line-height:1.6}.settlement-confirm{min-width:155px;text-align:right}.settlement-confirm .primary{white-space:nowrap;font-size:12px;padding:12px 15px}.settlement-confirm small{display:block;font-size:10px;color:#7b8873;line-height:1.6;margin-top:8px;max-width:220px}
+@media(max-width:760px){
+ .bid-notice{top:74px;right:12px;padding:13px 16px;gap:10px}.bid-notice strong{font-size:12px}.bid-notice small{font-size:11px}.bid-notice-icon{font-size:29px}
+ .table-surface.reviewing{min-height:490px}
+ .reviewing .seat.west,.reviewing .seat.east{top:136px}
+ .reviewing .play.west,.reviewing .play.east{top:215px}
+ .reviewing .seat.south{bottom:125px}.reviewing .play.south,.self-view.reviewing .play.south{bottom:173px}
+ .settlement-bottom{bottom:16px;max-width:calc(100% - 20px)}.settlement-cards{gap:3px}
+ .settlement-cards .card{width:29px;min-width:29px;height:48px}.settlement-cards .corner{left:3px;top:4px;font-size:10px}.settlement-cards .corner span{font-size:10px}.settlement-cards .joker .corner{font-size:9px}.settlement-cards .trump-dot{width:4px;height:4px;right:3px;top:4px}
+ .settlement-panel{display:block;padding:15px}.score-equation{gap:5px;font-size:11px}.score-total{font-size:17px}.settlement-confirm{text-align:left;margin-top:13px;display:flex;align-items:center;gap:12px}.settlement-confirm small{margin:0;max-width:none}.review-heading small{margin-left:5px}
+ .declaration-label{font-size:9px;top:calc(100% + 6px)}
+}
+@media(prefers-reduced-motion:reduce){.bid-notice{animation:none}}

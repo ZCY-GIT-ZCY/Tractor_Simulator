@@ -1,0 +1,261 @@
+{
+  "verified_at": "2026-10-12T04:04:34.396389+08:00",
+  "python_tests": {
+    "count": 139,
+    "passed": true
+  },
+  "node_tests": {
+    "count": 62,
+    "passed": true
+  },
+  "direction": {
+    "new_games": -1,
+    "seats": {
+      "0": "south",
+      "1": "west",
+      "2": "north",
+      "3": "east"
+    },
+    "order": [
+      0,
+      3,
+      2,
+      1
+    ]
+  },
+  "rules_audit": {
+    "no_bid_fixtures": 2,
+    "counter_fixtures": 2,
+    "terminal_fixtures": 23,
+    "structure_fixtures": 1,
+    "aggressive_complete_rounds": 12,
+    "checks": {
+      "actions": 2725,
+      "bids": 23,
+      "burials": 16,
+      "plays": 1044,
+      "tricks": 261,
+      "failed_throws": 202
+    },
+    "oracle": "tools.evaluate_ai; no tractor_sim.rules imports"
+  },
+  "http": {
+    "url": "http://127.0.0.1:8766",
+    "four_confirmed_seats": true,
+    "host_start": true,
+    "private_hands": true,
+    "unseated_private": true,
+    "occupied_seat_rejected": true,
+    "turn_ownership": true,
+    "stale_rejected": true,
+    "synchronized_after_action": true,
+    "reconnect_same_seat": true
+  },
+  "browser": {
+    "viewports": [
+      {
+        "width": 1280,
+        "height": 720
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "cards_33_inside": true,
+    "cards_25_inside": true,
+    "all_33_indices_hit_tested": true,
+    "whole_page_horizontal_overflow": false,
+    "burial_submitted": true,
+    "two_reinforcement_waits_for_other_seats": true,
+    "small_then_big_counter_transfers_banker": true,
+    "auction": {
+      "phase": "burying",
+      "player": 2,
+      "banker": 2,
+      "level": 2,
+      "counts": [
+        25,
+        25,
+        33,
+        25
+      ],
+      "queue": [],
+      "version": 15
+    },
+    "diamond_follow": {
+      "level": 2,
+      "trump": "H",
+      "lead": "D5",
+      "valid_follow": "D8",
+      "submitted": true,
+      "big_joker_rejected": true
+    },
+    "console_errors_or_warnings": 0,
+    "screenshots": [
+      "hand-fit-desktop.png",
+      "hand-fit-mobile.png",
+      "auction-two-confirmation.png",
+      "diamond-follow-two.png"
+    ]
+  },
+  "level_synchronization": {
+    "validate_version": true,
+    "request_context_checked": true,
+    "response_level_trump_version_checked": true,
+    "stale_snapshot_ignored": true
+  },
+  "reported_original_case": {
+    "reproduced": false,
+    "reason": "Historical records contain accepted actions only; original rejected selection and displayed state unavailable.",
+    "latest_five_audit": [
+      {
+        "filename": "打5_2026-10-12_02-07-53-071503_e17fbdc1.json",
+        "id": "e17fbdc127cf7e2552e6c10254bdbfcb",
+        "ordinary_diamond_follow_snapshots": 3,
+        "trump_only_examples": [
+          {
+            "frame": 150,
+            "trick": 11,
+            "seat": 0,
+            "level": 5,
+            "trump": null,
+            "lead": [
+              "D5"
+            ],
+            "effective_door": "T",
+            "forced": [
+              "16"
+            ]
+          }
+        ],
+        "errors": []
+      },
+      {
+        "filename": "打2_2026-10-12_01-54-06-130959_4767bf3f.json",
+        "id": "4767bf3fbc88c50e672a44290a765f9a",
+        "ordinary_diamond_follow_snapshots": 6,
+        "trump_only_examples": [],
+        "errors": []
+      },
+      {
+        "filename": "打2_2026-10-12_01-45-30-908067_9824f4fc.json",
+        "id": "9824f4fc37fbf48b26963ebf72cb431d",
+        "ordinary_diamond_follow_snapshots": 0,
+        "trump_only_examples": [
+          {
+            "frame": 134,
+            "trick": 7,
+            "seat": 3,
+            "level": 2,
+            "trump": "D",
+            "lead": [
+              "D6",
+              "D6"
+            ],
+            "effective_door": "T",
+            "forced": [
+              "16",
+              "16"
+            ]
+          },
+          {
+            "frame": 165,
+            "trick": 15,
+            "seat": 0,
+            "level": 2,
+            "trump": "D",
+            "lead": [
+              "D7"
+            ],
+            "effective_door": "T",
+            "forced": [
+              "15"
+            ]
+          },
+          {
+            "frame": 166,
+            "trick": 15,
+            "seat": 1,
+            "level": 2,
+            "trump": "D",
+            "lead": [
+              "D7"
+            ],
+            "effective_door": "T",
+            "forced": [
+              "D8"
+            ]
+          },
+          {
+            "frame": 167,
+            "trick": 15,
+            "seat": 2,
+            "level": 2,
+            "trump": "D",
+            "lead": [
+              "D7"
+            ],
+            "effective_door": "T",
+            "forced": [
+              "D13"
+            ]
+          }
+        ],
+        "errors": []
+      },
+      {
+        "filename": "打J_2026-10-12_00-43-14-040822_97857792.json",
+        "id": "978577923e8c0e1d804cf4ada42a116b",
+        "ordinary_diamond_follow_snapshots": 9,
+        "trump_only_examples": [],
+        "errors": []
+      },
+      {
+        "filename": "打J_2026-10-11_23-47-44-871207_e2aefa6a.json",
+        "id": "e2aefa6a5d2f39e57c0789c8e8803094",
+        "ordinary_diamond_follow_snapshots": 15,
+        "trump_only_examples": [
+          {
+            "frame": 197,
+            "trick": 23,
+            "seat": 1,
+            "level": 11,
+            "trump": "C",
+            "lead": [
+              "D11"
+            ],
+            "effective_door": "T",
+            "forced": [
+              "C3"
+            ]
+          },
+          {
+            "frame": 199,
+            "trick": 23,
+            "seat": 3,
+            "level": 11,
+            "trump": "C",
+            "lead": [
+              "D11"
+            ],
+            "effective_door": "T",
+            "forced": [
+              "C7"
+            ]
+          }
+        ],
+        "errors": []
+      }
+    ],
+    "fix_scope": "Bind validation to shown version/level/trump; show actual round level and lead effective suit; persist private follow validation failures."
+  },
+  "rules_source_matches_bundle": true,
+  "production_services_left_stopped": true,
+  "temporary_browser_tabs_closed": true,
+  "clean_bundle_deployment_passed": true,
+  "final_services_check": {
+    "tractor_processes": 0,
+    "8765_8766_listeners": 0
+  }
+}

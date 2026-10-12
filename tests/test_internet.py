@@ -17,8 +17,12 @@ class PublicRooms(unittest.TestCase):
         code = first["room"]
         self.assertRegex(code, r"^[A-Z2-9]{8}$")
         clients = [first] + [registry.enter({"mode": "pvp", "room": code, "name": str(i)}) for i in range(1, 4)]
-        self.assertEqual([c["seat"] for c in clients], [0, 1, 2, 3])
+        self.assertEqual([c["seat"] for c in clients], [None] * 4)
         self.assertEqual(len({c["token"] for c in clients}), 4)
+        room = registry.lookup(first['token'])
+        with room.condition:
+            for i, c in enumerate(clients): room.confirm_seat(c['token'], i)
+            room.start_room(first['token'])
         for c in clients:
             room = registry.lookup(c["token"])
             with room.condition:
@@ -33,7 +37,11 @@ class PublicRooms(unittest.TestCase):
             registry.enter({"mode": "self"})
         self.assertEqual(error.exception.code, "ROOM_LIMIT")
         second = registry.enter({"mode": "pvp", "room": first["room"]})
-        self.assertEqual(second["seat"], 1)
+        self.assertIsNone(second["seat"])
+        room = registry.lookup(second['token'])
+        with room.condition:
+            room.confirm_seat(second['token'], 3)
+            self.assertEqual(room.snapshot(second['token'])['seat'], 3)
 
     def test_inactive_members_expire_together_but_active_room_keeps_seats(self):
         registry = Registry(idle_seconds=100)

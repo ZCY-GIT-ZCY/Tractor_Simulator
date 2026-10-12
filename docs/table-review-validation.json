@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-11",
+  "python_tests": 113,
+  "node_tests": 43,
+  "browser": {
+    "desktop": "1440x1000",
+    "mobile": "390x844",
+    "self_round": {
+      "level": "J",
+      "captured": 110,
+      "bottom_points": 15,
+      "multiplier": 2,
+      "bottom_score": 30,
+      "penalty": 0,
+      "final_score": 140,
+      "modal_before_confirm": false,
+      "modal_after_confirm": true
+    },
+    "pvp_round": {
+      "level": "J",
+      "final_score": 120,
+      "banker": 0,
+      "observer": 1,
+      "nonbanker_confirm": "BANKER_ONLY",
+      "next_round_before_confirm": "REVIEW_PENDING",
+      "all_clients_synchronized": true
+    },
+    "legacy_replay": {
+      "level": "A",
+      "final_score": 175,
+      "bottom_cards_at_final_step": 8
+    }
+  },
+  "ai_banker_confirm_delay_seconds": 6,
+  "private_bottom_during_play": "unchanged; revealed only through terminal room review / replay frame"
+}

@@ -38,9 +38,9 @@ def buried_env(seed=0):
     return env
 
 
-def dealt_bidding_env(banker=0, bidder=0, bid_cards=None, reserved=None, confirm=True, auction=False):
+def dealt_bidding_env(banker=0, bidder=0, bid_cards=None, reserved=None, confirm=True, auction=False, level=2):
     """Deal a deterministic 108-card fixture through actual public actions."""
-    bid_cards = bid_cards or c('H', 2)
+    bid_cards = bid_cards or c('H', level)
     hands = copy.deepcopy(reserved or [[], [], [], []])
     for card in bid_cards:
         if card not in hands[bidder]: hands[bidder].append(card)
@@ -49,10 +49,11 @@ def dealt_bidding_env(banker=0, bidder=0, bid_cards=None, reserved=None, confirm
     remaining = iter(card for card in range(108) if card not in used)
     for hand in hands:
         hand.extend(next(remaining) for _ in range(25 - len(hand)))
-    deck = [hands[(banker + p) % 4][i] for i in range(25) for p in range(4)] + list(remaining)
-    env = TractorEnv(GameConfig(2, auction, banker), seed=0)
+    dealer = 0 if auction else banker
+    deck = [hands[(dealer - p) % 4][i] for i in range(25) for p in range(4)] + list(remaining)
+    env = TractorEnv(GameConfig(level, auction, banker), seed=0)
     env.deck = deck; env.kitty = deck[100:]; env.hands = [[], [], [], []]
-    env.hands[banker] = deck[:1]
+    env.hands[dealer] = deck[:1]
     while env.phase == 'dealing':
         can_bid = env.current_player == bidder and env.bid is None and all(card in env.hands[bidder] for card in bid_cards)
         env.step({'type': 'bid', 'cards': bid_cards} if can_bid else {'type': 'pass'})
@@ -216,10 +217,7 @@ class EngineRules(unittest.TestCase):
         self.assertEqual(env.validate_action({'type':'bid','cards':[53,107]})['code'],'FIRST_BID_JOKER')
 
     def test_counter_keeps_banker_and_first_lead(self):
-        env=TractorEnv(GameConfig(2,False,0),seed=0)
-        policy=RandomPolicy(2)
-        while env.phase=='dealing':env.step(policy.act(env.observe(env.current_player)))
-        while env.phase=='final_bidding':env.step({'type':'pass'})
+        env=dealt_bidding_env()
         self.assertEqual(env.phase,'burying')
         env.bid={'strength':1,'player':0,'cards':c('S',2)}
         env.step({'type':'bury','cards':env.hands[0][:8]})
@@ -242,7 +240,7 @@ class EngineRules(unittest.TestCase):
             with self.subTest(banker=banker):
                 env=dealt_bidding_env(banker,banker)
                 env.step({'type':'bury','cards':env.hands[banker][-8:]})
-                expected=[(banker+i)%4 for i in range(1,4)]
+                expected=[(banker-i)%4 for i in range(1,4)]
                 self.assertEqual(env.observe(banker)['counter_players'],expected)
                 asked=[]
                 while env.phase=='countering':
@@ -254,24 +252,26 @@ class EngineRules(unittest.TestCase):
         # A=0 shows hearts; B=1 takes/buries. A cannot counter its own hearts.
         env=dealt_bidding_env(1,0,reserved=[c('H',2,True)+[52,106],[],[],[]])
         env.step({'type':'bury','cards':env.hands[1][-8:]})
-        self.assertEqual(env.counter_queue,[2,3])
+        self.assertEqual(env.counter_queue,[3,2])
         before=env.export_state()
         self.assertFalse(env.validate_action({'type':'bid','cards':[52,106]},0)['valid'])
         self.assertFalse(env.validate_action({'type':'bid','cards':c('H',2,True)},0)['valid'])
         self.assertEqual(env.export_state(),before)
-        env.step({'type':'pass'});self.assertEqual(env.current_player,3)
+        env.step({'type':'pass'});self.assertEqual(env.current_player,2)
         env.step({'type':'pass'})
         self.assertEqual((env.phase,env.current_player),('playing',1))
 
     def test_successive_counters_restart_at_next_seat(self):
         env=dealt_bidding_env(reserved=[c('H',2),c('S',2,True),[52,106],[]])
         env.step({'type':'bury','cards':env.hands[0][-8:]})
+        env.step({'type':'pass'});env.step({'type':'pass'})
         env.step({'type':'bid','cards':c('S',2,True)})
         env.step({'type':'bury','cards':env.hands[1][-8:]})
-        self.assertEqual(env.counter_queue,[2,3,0])
+        self.assertEqual(env.counter_queue,[0,3,2])
+        env.step({'type':'pass'});env.step({'type':'pass'})
         env.step({'type':'bid','cards':[52,106]})
         env.step({'type':'bury','cards':env.hands[2][-8:]})
-        self.assertEqual(env.counter_queue,[3,0,1])
+        self.assertEqual(env.counter_queue,[1,0,3])
         while env.phase=='countering':env.step({'type':'pass'})
         self.assertEqual((env.phase,env.current_player),('playing',0))
 
@@ -283,6 +283,7 @@ class EngineRules(unittest.TestCase):
         self.assertNotEqual(set(latest),set(original))
         env.step({'type':'bury','cards':latest})
         for player,bid in ((1,c('S',2,True)),(2,[52,106]),(3,[53,107])):
+            while env.current_player!=player:env.step({'type':'pass'})
             before=env.hands[player][:]
             env.step({'type':'bid','cards':bid})
             self.assertEqual(env.current_player,player)
@@ -309,17 +310,19 @@ class EngineRules(unittest.TestCase):
                 asked.append(env.current_player)
                 self.assertIsNone(env.observe(env.current_player)['drawn_card'])
                 env.step({'type':'pass'})
-            self.assertEqual(asked,[(banker+i)%4 for i in range(4)])
+            self.assertEqual(asked,[(banker-i)%4 for i in range(4)])
             self.assertEqual((env.phase,env.current_player),('burying',banker))
 
-    def test_final_bidding_counter_takes_bottom_but_fixed_banker_keeps_lead(self):
+    def test_normal_final_counter_keeps_original_bottom_and_first_lead_with_banker(self):
         env=dealt_bidding_env(reserved=[c('H',2),c('S',2,True),[],[]],confirm=False)
-        original=env.kitty[:];before=env.hands[1][:]
-        env.step({'type':'pass'});env.step({'type':'bid','cards':c('S',2,True)})
-        self.assertEqual((env.phase,env.current_player,env.banker),('burying',1,0))
-        self.assertEqual(set(env.hands[1])-set(before),set(original))
-        env.step({'type':'bury','cards':env.hands[1][-8:]})
-        self.assertEqual(env.current_player,2)
+        original=env.kitty[:];before=env.hands[1][:];banker_hand=env.hands[0][:]
+        for _ in range(3):env.step({'type':'pass'})
+        env.step({'type':'bid','cards':c('S',2,True)})
+        self.assertEqual((env.phase,env.current_player,env.banker),('burying',0,0))
+        self.assertEqual(set(env.hands[0])-set(banker_hand),set(original))
+        self.assertEqual(env.hands[1],before)
+        env.step({'type':'bury','cards':env.hands[0][-8:]})
+        self.assertEqual(env.current_player,3)
         while env.phase=='countering':env.step({'type':'pass'})
         self.assertEqual((env.phase,env.current_player),('playing',0))
 
@@ -334,13 +337,67 @@ class EngineRules(unittest.TestCase):
 
     def test_final_bidding_counter_in_auction_also_takes_banker(self):
         env=dealt_bidding_env(reserved=[c('H',2),c('S',2,True),[],[]],confirm=False,auction=True)
-        env.step({'type':'pass'});env.step({'type':'bid','cards':c('S',2,True)})
+        for _ in range(3):env.step({'type':'pass'})
+        env.step({'type':'bid','cards':c('S',2,True)})
+        self.assertEqual((env.phase,env.banker),('final_bidding',1))
+        while env.phase=='final_bidding':env.step({'type':'pass'})
         self.assertEqual((env.phase,env.current_player,env.banker),('burying',1,1))
+
+    def test_only_level_two_auction_transfers_banking_before_first_bottom(self):
+        for level in (2, 5, 6, 11, 14):
+            with self.subTest(level=level):
+                env=dealt_bidding_env(bidder=1, reserved=[[],c('H',level),c('S',level,True),[]],
+                                     confirm=False,auction=True,level=level)
+                self.assertEqual(env.banker,1)  # First auction bid chooses banker at any initial level.
+                original=env.kitty[:]
+                while env.current_player!=2:env.step({'type':'pass'})
+                env.step({'type':'bid','cards':c('S',level,True)})
+                while env.phase=='final_bidding':env.step({'type':'pass'})
+                expected=2 if level==2 else 1
+                self.assertEqual((env.phase,env.banker,env.kitty_owner),('burying',expected,2))
+                self.assertEqual(env.known_kitties[2][-1],original)
+                self.assertEqual(env.bid['player'],2)
+                env.assert_invariants()
+
+    def test_non_two_auction_counter_during_deal_also_keeps_first_banker(self):
+        env=TractorEnv(GameConfig(6,True,0),seed=0)
+        reserved=[c('H',6),c('S',6,True),[],[]]
+        used=sum(reserved,[]);rest=iter(c for c in range(108) if c not in used)
+        for hand in reserved:hand.extend(next(rest) for _ in range(25-len(hand)))
+        env.deck=[reserved[(-p)%4][i] for i in range(25) for p in range(4)]+list(rest)
+        env.kitty=env.deck[100:];env.hands=[[env.deck[0]],[],[],[]]
+        env.step({'type':'bid','cards':c('H',6)})
+        while env.phase=='dealing':
+            actor=env.current_player
+            can_counter=actor==1 and env.bid['strength']==1 and all(c in env.hands[1] for c in c('S',6,True))
+            env.step({'type':'bid','cards':c('S',6,True)} if can_counter else {'type':'pass'})
+        self.assertEqual((env.banker,env.bid['player']),(0,1))
+        while env.phase=='final_bidding':env.step({'type':'pass'})
+        self.assertEqual(env.kitty_owner,1)
+
+    def test_normal_prebottom_banker_gets_original_then_counter_gets_latest_burial(self):
+        env=dealt_bidding_env(reserved=[c('H',2),c('S',2,True),[52,106],[]],confirm=False)
+        original=env.kitty[:]
+        for _ in range(3):env.step({'type':'pass'})
+        env.step({'type':'bid','cards':c('S',2,True)})
+        self.assertEqual(env.kitty_owner,0)
+        self.assertEqual(env.known_kitties[0][-1],original)
+        buried=env.hands[0][:8]
+        self.assertNotEqual(set(buried),set(original))
+        env.step({'type':'bury','cards':buried})
+        self.assertEqual(env.current_player,3)
+        env.step({'type':'pass'})
+        before=env.hands[2][:]
+        env.step({'type':'bid','cards':[52,106]})
+        self.assertEqual((env.banker,env.kitty_owner),(0,2))
+        self.assertEqual(set(env.hands[2])-set(before),set(buried))
+        self.assertEqual(env.known_kitties[2][-1],buried)
+        env.assert_invariants()
 
     def test_final_bidding_checkpoint_preserves_remaining_seats(self):
         env=dealt_bidding_env(confirm=False);env.step({'type':'pass'})
         restored=TractorEnv.from_state(json.loads(json.dumps(env.export_state())))
-        self.assertEqual(restored.final_bid_queue,[1,2,3])
+        self.assertEqual(restored.final_bid_queue,[3,2,1])
         for _ in range(3):env.step({'type':'pass'});restored.step({'type':'pass'})
         self.assertEqual(restored.export_state(),env.export_state())
 
@@ -357,7 +414,6 @@ class EngineRules(unittest.TestCase):
     def test_big_joker_counter_skips_questions_after_rebury(self):
         env=dealt_bidding_env(reserved=[c('H',2),[],[],[53,107]])
         env.step({'type':'bury','cards':env.hands[0][-8:]})
-        env.step({'type':'pass'});env.step({'type':'pass'})
         env.step({'type':'bid','cards':[53,107]})
         self.assertEqual(env.bid['strength'],4)
         transition=env.step({'type':'bury','cards':env.hands[3][-8:]})
@@ -377,6 +433,7 @@ class EngineRules(unittest.TestCase):
             elif env.current_player==1 and env.bid['strength']<4 and all(x in env.hands[1] for x in (53,107)):
                 action={'type':'bid','cards':[53,107]}
             env.step(action)
+        self.assertEqual((env.kitty_owner,env.current_player),(0,0))
         env.step({'type':'bury','cards':env.hands[0][-8:]})
         self.assertEqual((env.phase,env.current_player),('playing',0))
 
@@ -384,7 +441,7 @@ class EngineRules(unittest.TestCase):
         env=dealt_bidding_env(1,0)
         env.step({'type':'bury','cards':env.hands[1][-8:]});env.step({'type':'pass'})
         restored=TractorEnv.from_state(json.loads(json.dumps(env.export_state())))
-        self.assertEqual(restored.counter_queue,[3])
+        self.assertEqual(restored.counter_queue,[2])
         restored.step({'type':'pass'});env.step({'type':'pass'})
         self.assertEqual(restored.export_state(),env.export_state())
 
@@ -395,11 +452,11 @@ class EngineRules(unittest.TestCase):
         obs['hand'].append(999);self.assertNotIn(999,env.hands[1])
 
     def test_forced_play_only_for_current_follower_and_keeps_rng(self):
-        env=fixture([c('S',8),c('S',3,True),c('H',5),c('C',7)])
+        env=fixture([c('S',8),c('C',7),c('H',5),c('S',3,True)])
         self.assertIsNone(env.observe(0)['forced_play'])
         env.step({'type':'play','cards':c('S',8)})
         before=env.export_state()
-        selected=env.observe(1)['forced_play']
+        selected=env.observe(3)['forced_play']
         self.assertEqual(list(map(face,selected)),list(map(face,c('S',3))))
         self.assertIsNone(env.observe(0,omniscient=True)['forced_play'])
         self.assertEqual(env.export_state(),before)
@@ -529,7 +586,10 @@ class EngineRules(unittest.TestCase):
                                   (c('D',3,True)+c('D',8,True)+c('D',9)+[52,53],8)):
             env=fixture([c('S',3),winning,c('H',3),c('C',3)],level=11)
             env.kitty=c('H',5)+c('H',10)+c('H',13)+c('C',5)+c('C',10)+c('C',13)+c('S',7)+c('S',8)
-            env.last_trick={'plays':[{'player':0,'cards':c('S',11)},{'player':1,'cards':winning}]}
+            # The lead defines the bottom structure; a losing follower's J
+            # must still not trigger the special downgrade.
+            env.last_trick={'plays':[{'player':0,'cards':winning},{'player':2,'cards':c('S',11)},
+                                     {'player':1,'cards':winning}]}
             env._settle(1)
             self.assertEqual(env.result['multiplier'],multiplier)
             self.assertEqual(env.result['bottom'],50*multiplier)
@@ -542,7 +602,7 @@ class EngineRules(unittest.TestCase):
             env.last_trick={'plays':[{'player':p,'cards':h} for p,h in enumerate(env.hands)]}
             env._settle(0)
             self.assertEqual((env.result['upgrading_team'],env.result['upgrade']),(team,amount))
-            self.assertEqual(env.banker,2 if team==0 else 1)
+            self.assertEqual(env.banker,2 if team==0 else 3)
 
     def test_mandatory_cannot_skip_and_records_permanent(self):
         env=TractorEnv(GameConfig(3,False,0));env.levels=[3,3]
@@ -551,6 +611,43 @@ class EngineRules(unittest.TestCase):
         env.levels[0]=11;env.passed[0].update((2,5,10,11))
         env.levels[0]=2
         self.assertEqual(env._advance(0,5),7)
+
+    def test_initial_level_never_credits_unplayed_defending_levels(self):
+        for initial in range(2,15):
+            env=TractorEnv(GameConfig(initial,False,0))
+            self.assertEqual(env.passed,[set(),set()])
+
+    def test_attacking_promotion_cannot_leave_unplayed_current_mandatory_level(self):
+        for level in sorted(MANDATORY):
+            for score in (120,160,200):
+                with self.subTest(level=level,score=score):
+                    env=fixture([c('S',3),c('H',3),c('D',3),c('C',3)],level=level)
+                    env.captured_score=env.score=score
+                    env.last_trick={'plays':[{'player':p,'cards':h} for p,h in enumerate(env.hands)]}
+                    env._settle(0)
+                    self.assertEqual(env.levels[1],level)
+                    self.assertNotIn(level,env.passed[1])
+                    self.assertIn(level,env.passed[0])
+                    self.assertEqual(env.result['upgrade'],score//40-2)
+                    if level<14:self.assertEqual(env.result['mandatory_stop'],level)
+                    env.step({'type':'next_round'})
+                    self.assertEqual((env.banker,env.level),(3,level))
+
+    def test_completed_mandatory_level_can_be_left_by_attacking_promotion(self):
+        for level in (2,5,10,11,13):
+            env=fixture([c('S',3),c('H',3),c('D',3),c('C',3)],level=level)
+            env.passed[1].add(level)
+            env.captured_score=env.score=120
+            env.last_trick={'plays':[{'player':p,'cards':h} for p,h in enumerate(env.hands)]}
+            env._settle(0)
+            self.assertEqual(env.levels[1],level+1)
+
+    def test_high_initial_level_downgrade_does_not_invent_a_played_two(self):
+        env=fixture([c('S',3),c('D',11),c('S',4),c('S',5)],level=11)
+        for _ in range(4):env.step({'type':'play','cards':env.hands[env.current_player][:]})
+        self.assertEqual(env.levels[0],2)
+        self.assertIn(11,env.passed[0]);self.assertNotIn(2,env.passed[0])
+        self.assertEqual(env._advance(0,3),2)
 
     def test_j_and_a_downgrade_by_winners_cards_only(self):
         for level,target in ((11,2),(14,11)):

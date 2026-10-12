@@ -1,0 +1,278 @@
+{
+  "policy": "enoch-table-v1",
+  "opponent": "RandomPolicy",
+  "seeds": 16,
+  "rounds": 32,
+  "wins": 29,
+  "win_rate": 0.90625,
+  "wilson_95": [
+    0.7578150066422116,
+    0.9675990373736805
+  ],
+  "time_ms": 250,
+  "worlds_limit": 2,
+  "search_batches": 1830,
+  "play_decisions": 1230,
+  "mean_decision_ms": 143.55211382113822,
+  "p95_decision_ms": 251.6,
+  "seconds": 180.64371319999918,
+  "results": [
+    {
+      "seed": 2000,
+      "level": 2,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 10,
+      "steps": 191
+    },
+    {
+      "seed": 2000,
+      "level": 2,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 120,
+      "steps": 185
+    },
+    {
+      "seed": 2001,
+      "level": 3,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 10,
+      "steps": 187
+    },
+    {
+      "seed": 2001,
+      "level": 3,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 175,
+      "steps": 196
+    },
+    {
+      "seed": 2002,
+      "level": 4,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 35,
+      "steps": 171
+    },
+    {
+      "seed": 2002,
+      "level": 4,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 210,
+      "steps": 183
+    },
+    {
+      "seed": 2003,
+      "level": 5,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 70,
+      "steps": 179
+    },
+    {
+      "seed": 2003,
+      "level": 5,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 145,
+      "steps": 191
+    },
+    {
+      "seed": 2004,
+      "level": 6,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 0,
+      "steps": 171
+    },
+    {
+      "seed": 2004,
+      "level": 6,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 100,
+      "steps": 195
+    },
+    {
+      "seed": 2005,
+      "level": 7,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 15,
+      "steps": 177
+    },
+    {
+      "seed": 2005,
+      "level": 7,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 130,
+      "steps": 183
+    },
+    {
+      "seed": 2006,
+      "level": 8,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 30,
+      "steps": 171
+    },
+    {
+      "seed": 2006,
+      "level": 8,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 145,
+      "steps": 195
+    },
+    {
+      "seed": 2007,
+      "level": 9,
+      "enoch_team": 0,
+      "enoch_won": false,
+      "attacker_score": 90,
+      "steps": 203
+    },
+    {
+      "seed": 2007,
+      "level": 9,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 205,
+      "steps": 183
+    },
+    {
+      "seed": 2008,
+      "level": 10,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 75,
+      "steps": 183
+    },
+    {
+      "seed": 2008,
+      "level": 10,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 200,
+      "steps": 175
+    },
+    {
+      "seed": 2009,
+      "level": 11,
+      "enoch_team": 0,
+      "enoch_won": false,
+      "attacker_score": 85,
+      "steps": 183
+    },
+    {
+      "seed": 2009,
+      "level": 11,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 200,
+      "steps": 191
+    },
+    {
+      "seed": 2010,
+      "level": 12,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 20,
+      "steps": 191
+    },
+    {
+      "seed": 2010,
+      "level": 12,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 165,
+      "steps": 191
+    },
+    {
+      "seed": 2011,
+      "level": 13,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 40,
+      "steps": 175
+    },
+    {
+      "seed": 2011,
+      "level": 13,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 150,
+      "steps": 177
+    },
+    {
+      "seed": 2012,
+      "level": 14,
+      "enoch_team": 0,
+      "enoch_won": false,
+      "attacker_score": 80,
+      "steps": 161
+    },
+    {
+      "seed": 2012,
+      "level": 14,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 165,
+      "steps": 173
+    },
+    {
+      "seed": 2013,
+      "level": 2,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 5,
+      "steps": 171
+    },
+    {
+      "seed": 2013,
+      "level": 2,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 110,
+      "steps": 195
+    },
+    {
+      "seed": 2014,
+      "level": 3,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 5,
+      "steps": 184
+    },
+    {
+      "seed": 2014,
+      "level": 3,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 130,
+      "steps": 188
+    },
+    {
+      "seed": 2015,
+      "level": 4,
+      "enoch_team": 0,
+      "enoch_won": true,
+      "attacker_score": 10,
+      "steps": 165
+    },
+    {
+      "seed": 2015,
+      "level": 4,
+      "enoch_team": 1,
+      "enoch_won": true,
+      "attacker_score": 175,
+      "steps": 187
+    }
+  ],
+  "scope": "two Enoch seats versus two Random seats, balanced defender/attacker; not a human skill rating"
+}

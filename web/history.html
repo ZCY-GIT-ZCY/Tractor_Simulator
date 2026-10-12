@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>双升 · 对局回放</title><link rel="icon" href="/mark.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/history.css"><link rel="stylesheet" href="/table-review.css"></head>
+<body class="history-page">
+ <header><a class="brand" href="/" aria-label="返回双升牌桌"><img src="/mark.svg" alt=""><span>双升<span class="brand-sub">TRACTOR CLUB</span></span></a><span class="archive-header">牌桌档案 <i></i> HISTORY</span><a class="plain back-table" href="/">返回牌桌 ↗</a></header>
+ <main class="archive-main">
+  <section id="library">
+   <div class="archive-hero"><div><div class="eyebrow">EVERY HAND TELLS A STORY</div><h1>好牌值得<span>再看一遍。</span></h1><p>重看每一次亮主、每一手配合，和决定胜负的最后一轮。</p></div><div class="archive-total"><strong id="recordTotal">—</strong><span>局牌，已入档</span><div>♠ <i>♥</i> ♦ ♣</div></div></div>
+   <div class="library-toolbar"><div class="archive-tabs"><button class="archive-tab active" data-filter="all">全部对局</button><button class="archive-tab" data-filter="pve">人机对局</button><button class="archive-tab" data-filter="pvp">好友房间</button><button class="archive-tab" data-filter="self">自对弈</button><button class="archive-tab" data-filter="evaluation">AI 评测</button></div><div class="archive-search"><label class="sr-only" for="historySearch">搜索对局</label><input id="historySearch" placeholder="搜索牌友、日期或房间"><label class="sr-only" for="historyLevel">筛选等级</label><select id="historyLevel"><option value="all">所有等级</option></select><button class="plain" id="refreshHistory" aria-label="刷新历史列表">刷新 ↻</button></div></div>
+   <div id="historyStatus" class="history-status" role="status">正在整理牌桌档案…</div><div id="historyList" class="history-list"></div>
+   <div class="archive-footnote">每局结算后自动入档 · 最新对局排在前面 · 回放可查看四家手牌</div>
+  </section>
+  <section id="viewer" hidden>
+   <div class="viewer-heading"><button class="plain" id="backHistory">← 历史对局</button><div><div class="eyebrow">AT THE TABLE, ONCE MORE</div><h1 id="replayTitle"></h1><p id="replayMeta"></p></div><span class="replay-mode-tag" id="replayMode"></span></div>
+   <div class="replay-layout">
+    <div class="replay-stage">
+     <div class="replay-scoreboard"><span>级牌 <strong id="replayLevel"></strong></span><span>主牌 <strong id="replayTrump"></strong></span><span>闲家抓分 <strong id="replayScore">0</strong></span><span id="replayTrick"></span></div>
+     <div class="table-surface self-view" id="replayTable"><div class="table-outline"></div><div class="table-watermark"><img src="/mark.svg" alt=""><span>TRACTOR</span><small>落牌有声，往事可寻</small></div><div id="replayPlayers"></div><div id="replayPlays"></div><div class="table-status" id="replayTableStatus"></div><div class="kitty-area" id="replayKitty"></div><div id="replayBottom" class="settlement-bottom" hidden></div></div>
+     <div class="replay-hand-heading"><div><strong id="replayHandTitle"></strong><small id="replayPrivacyText">四家手牌可见 · 对局中底牌不明示</small></div><div class="seat-switch" aria-label="查看手牌"><button data-seat="auto" class="active">跟随行动</button><button data-seat="0">南</button><button data-seat="1">西</button><button data-seat="2">北</button><button data-seat="3">东</button></div></div>
+     <div class="full-hand replay-full-hand" id="replayHand"></div>
+     <section class="replay-controls" aria-label="回放控制"><div class="replay-progress"><label class="sr-only" for="replayProgress">回放进度</label><input type="range" id="replayProgress" min="0" max="1" value="0" step="1"><span id="replayProgressText">0 / 0</span></div><div class="replay-control-row"><div class="playback-buttons"><button class="secondary" id="replayPrev" aria-label="上一步">←</button><button class="primary" id="replayPlay">▶ 自动播放</button><button class="secondary" id="replayNext">下一步 →</button><button class="plain" id="skipDealing">跳至出牌 ↗</button></div><div class="speed-control"><label for="replaySpeed">速度 <output id="replaySpeedValue">1×</output></label><input type="range" id="replaySpeed" min="0.2" max="5" step="0.01" value="1" aria-label="播放速度"><div><span>0.2×</span><button class="plain" id="resetSpeed">1×</button><span>5×</span></div></div></div><div class="replay-help"><span id="replayTiming">每 1 秒一步</span><span>← → 逐步回放 · 空格播放 / 暂停</span></div></section>
+    </div>
+    <aside class="replay-sidebar"><div class="current-action"><div class="eyebrow">THIS MOMENT</div><h2 id="replayActionTitle"></h2><div id="replayActionCards" class="action-card-row"></div><p id="replayActionDetail" aria-live="polite"></p></div><div id="replaySettlement" class="replay-settlement" hidden></div><details class="timeline-container" open><summary>对局时间线 <span id="timelineCount"></span></summary><div class="replay-timeline" id="replayTimeline"></div></details></aside>
+   </div>
+  </section>
+ </main>
+ <script src="/hand-order.js"></script><script src="/replay-clock.js"></script><script src="/history.js"></script>
+</body></html>

@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-12",
+  "python_tests": 122,
+  "node_tests": 48,
+  "atomic_same_seat_confirm": true,
+  "cancel_releases_seat": true,
+  "local_preview_does_not_reserve": true,
+  "browser_two_humans_two_ai": true,
+  "explicit_host_start": true,
+  "unseated_receives_no_hands": true,
+  "host_can_fill_vacant_seats": true,
+  "cannot_replace_confirmed_human": true,
+  "active_vacancy_ai_replacement_test": true,
+  "desktop": {
+    "width": 1440,
+    "height": 1000,
+    "screenshot": "seating-desktop.png"
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844,
+    "host_controls_visible": true,
+    "horizontal_overflow": false,
+    "screenshot": "seating-mobile.png"
+  },
+  "http_smoke": {
+    "url": "http://127.0.0.1:8765",
+    "four_confirmed_seats": true,
+    "host_start": true,
+    "private_hands": true,
+    "unseated_private": true,
+    "occupied_seat_rejected": true,
+    "turn_ownership": true,
+    "stale_rejected": true,
+    "synchronized_after_action": true,
+    "reconnect_same_seat": true
+  },
+  "production_pvp_hand": {
+    "server": "http://127.0.0.1:8765",
+    "mode": "pvp",
+    "policy": {
+      "id": "enoch-table-v1",
+      "name": "Enoch 桌规版"
+    },
+    "human_seat": 1,
+    "local_ai_seats": [
+      0,
+      2,
+      3
+    ],
+    "one_hand_completed": true,
+    "human_actions": 42,
+    "final_score": 55,
+    "terminal_phase": "round_end",
+    "no_private_hands_in_observation": true,
+    "paused": false,
+    "final_eight_bottom_cards": true,
+    "history_saved": true,
+    "replay_id": "978577923e8c0e1d804cf4ada42a116b",
+    "seconds": 105.18
+  },
+  "browser_active_vacancy_replaced_by_ai": true
+}

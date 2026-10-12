@@ -11,12 +11,34 @@ OUTPUT = ROOT / "dist" / "TractorWeb.zip"
 def main():
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     files = []
-    for folder in ("tractor_sim", "web", "tools", "tests"):
+    for folder in ("tractor_sim", "web", "tools", "tests", "licenses"):
         files += [p for p in (ROOT / folder).rglob("*") if p.is_file()
                   and "__pycache__" not in p.parts and p.suffix not in (".pyc", ".pyo")]
-    files += [ROOT / name for name in ("README.md", "run.bat", "run.ps1", "run-public.bat", "run-lan.bat",
+    files += [ROOT / name for name in ("README.md", "启动双升联网游戏.bat", "停止双升联网服务.bat",
+                                      "run.bat", "run.ps1", "run-public.bat", "run-lan.bat",
                                       "stop-public.ps1", "stop-public.bat", "internet.json", "pyproject.toml", "THIRD_PARTY.md")]
-    files += [ROOT / "docs" / name for name in ("internet.md", "api.md", "validation.md", "双升游戏规则.录音原版.md")]
+    files += [ROOT / "docs" / name for name in ("deployment.md", "internet.md", "api.md", "validation.md", "双升游戏规则.录音原版.md")]
+    files += [ROOT / "docs" / name for name in ("ai.md", "ai-evaluation.md", "replay.md")]
+    for name in ("ai-benchmark.json", "ai-http-validation.json", "ai-evaluation.json", "ai-rule-cases.json", "ai-manual-evaluation.json"):
+        if (ROOT / "docs" / name).is_file():
+            files.append(ROOT / "docs" / name)
+    for name in ("history-validation.json", "replay-history-desktop.png", "replay-viewer-desktop.png",
+                 "replay-history-mobile.png", "replay-viewer-mobile.png", "table-review-desktop.png",
+                 "table-review-mobile.png", "table-review-pvp-confirmed.png", "table-review-validation.json",
+                 "seating-desktop.png", "seating-mobile.png", "seating-validation.json",
+                 "multiplayer-fixes-validation.json", "multiplayer-preselection.png",
+                 "multiplayer-preselection-mobile.png", "auto-deal-paused.png",
+                 "turn-and-follow-validation.json", "hand-fit-desktop.png", "hand-fit-mobile.png",
+                 "auction-two-confirmation.png", "diamond-follow-two.png",
+                 "realtime-bidding-desktop.png", "realtime-bidding-mobile.png",
+                 "bidding-grace-desktop.png", "bidding-grace-mobile.png", "bidding-grace-validation.json",
+                 "frontend.png", "frontend-draw.png", "frontend-debug-reconnect.png",
+                 "frontend-final-bidding.png", "frontend-pve-draw.png", "web-desktop-game.png",
+                 "web-desktop-invite.png", "web-live-invite.png", "web-mobile-game.png",
+                 "web-mobile-lobby.png", "trump-notice.png", "full-match-validation.json",
+                 "internet-validation.json", "package-validation.json"):
+        if (ROOT / "docs" / name).is_file():
+            files.append(ROOT / "docs" / name)
     rules = ROOT.parent / "双升游戏规则.md"
     if not rules.is_file(): rules = ROOT / "rules" / "双升游戏规则.md"
     manifest = {}

@@ -25,12 +25,22 @@ def verify(base):
         for i in range(4):
             status, client = request("/api/session", {"mode": "pvp", "room": code, "name": f"QA {i}",
                                  "config": {"initial_level": 8, "auction": False, "banker": 0}})
-            assert status == 200 and client["seat"] == i, (status, client)
+            assert status == 200 and client["seat"] is None and not client["started"], (status, client)
             clients.append(client)
-        assert clients[-1]["started"]
-        assert request("/api/session", {"mode": "pvp", "room": code})[0] == 422
+            status, seated = request("/api/seat/confirm", {"seat": i}, client["token"])
+            assert status == 200 and seated["seat"] == i and not seated["started"], (status, seated)
+            client["seat"] = i
+        status, occupied = request("/api/seat/confirm", {"seat": 0}, clients[1]["token"])
+        assert status == 422 and occupied["code"] == "SEAT_CONFIRMED"
+        status, begun = request("/api/room/start", {}, clients[0]["token"])
+        assert status == 200 and begun["started"]
+        status, waiter = request("/api/session", {"mode": "pvp", "room": code, "name": "QA waiting"})
+        assert status == 200 and waiter["seat"] is None and waiter["state"] is None
+        clients.append(waiter)
+        status, denied = request("/api/seat/confirm", {"seat": 0}, waiter["token"])
+        assert status == 422 and denied["code"] == "SEAT_TAKEN"
         versions = []
-        for c in clients:
+        for c in clients[:4]:
             status, current = request("/api/state", token=c["token"])
             assert status == 200 and current["controlled"] == [c["seat"]]
             assert "hands" not in current["state"] and current["state"]["kitty"] is None
@@ -39,15 +49,16 @@ def verify(base):
         status, denied = request("/api/action", {"version": versions[0], "action": {"type": "pass"}}, clients[1]["token"])
         assert status == 422 and denied["code"] == "NOT_YOUR_TURN"
         status, advanced = request("/api/action", {"version": versions[0], "action": {"type": "pass"}}, clients[0]["token"])
-        assert status == 200 and advanced["state"]["current_player"] == 1
+        assert status == 200 and advanced["state"]["current_player"] == 3
         status, stale = request("/api/action", {"version": versions[0], "action": {"type": "pass"}}, clients[1]["token"])
         assert status == 409 and stale["error"] == "STALE"
-        for c in clients:
+        for c in clients[:4]:
             _, current = request("/api/state", token=c["token"])
             assert current["version"] == advanced["version"]
             assert current["state"]["deal_count"] == 2
             assert current["seat"] == c["seat"]
-        return {"url": base, "four_seats": True, "private_hands": True, "fifth_rejected": True,
+        return {"url": base, "four_confirmed_seats": True, "host_start": True,
+                "private_hands": True, "unseated_private": True, "occupied_seat_rejected": True,
                 "turn_ownership": True, "stale_rejected": True, "synchronized_after_action": True,
                 "reconnect_same_seat": True}
     finally:
