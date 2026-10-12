@@ -23,7 +23,9 @@ function browser(initialToken = null, saved = null) {
  }
  const sessionStorage = storage(initialToken?[['tractor_session',initialToken]]:[]);
  const localStorage = storage(saved?[['tractor_resume',JSON.stringify(saved)]]:[]);
- const context = vm.createContext({document:{getElementById:element, querySelectorAll(){return [];},
+ let now=100000;
+ class ClockDate extends Date { static now(){return now;} }
+ const context = vm.createContext({Date:ClockDate,document:{getElementById:element, querySelectorAll(){return [];},
   addEventListener:(event,fn)=>listeners.set(event,fn)}, sessionStorage,localStorage,
   location:{search:'',origin:'http://127.0.0.1:8765',hostname:'127.0.0.1'},
   window:{addEventListener:(event,fn)=>listeners.set('window:'+event,fn)}, navigator:{}, innerWidth:1280,
@@ -40,7 +42,7 @@ function browser(initialToken = null, saved = null) {
  // Poll transport is covered by the Python HTTP tests; keep these tests focused
  // on the competing action, leave, bootstrap and resume promises.
  vm.runInContext('poll=async()=>{}',context);
- return {context,element,requests,listeners,timers,sessionStorage,localStorage,
+ return {context,element,requests,listeners,timers,sessionStorage,localStorage,advanceTime:ms=>{now+=ms;},
   run:code=>vm.runInContext(code,context),get:code=>vm.runInContext(code,context)};
 }
 function snapshot(room='room_one',token='token_one') {
@@ -431,7 +433,7 @@ test('sole legal follow replaces a conflicting preview, while round changes clea
  assert.equal(b.get('selected.size'),0);
 });
 
-test('new level card keeps automatic draws at 650ms, including card zero',()=>{
+test('new level card keeps automatic draws at 1000ms, including card zero',()=>{
  const b=browser(),data=snapshot();data.state.drawn_card=1;sit(b,data);
  b.run('autoDeal=true;scheduleAutoDeal()');const timer=b.timers.get(b.get('autoTimer')).fn;
  const count=b.requests.length;
@@ -439,7 +441,7 @@ test('new level card keeps automatic draws at 650ms, including card zero',()=>{
  b.run('acceptSnapshot(fixture)');assert.equal(b.get('autoDeal'),true);
  assert.equal(b.element('autoDealButton').textContent,'暂停摸牌');
  timer();assert.equal(b.requests.length,count);assert.equal(latest(b,'/api/action'),undefined);
- const active=b.timers.get(b.get('autoTimer'));assert.equal(active.delay,650);active.fn();
+ const active=b.timers.get(b.get('autoTimer'));assert.equal(active.delay,1000);active.fn();
  assert.equal(JSON.parse(latest(b,'/api/action').options.body).action.type,'pass');
 });
 
@@ -449,8 +451,48 @@ test('new small or big joker pair never interrupts automatic draws',()=>{
   b.run('autoDeal=true');b.context.fixture={...data,version:5,state:{...data.state,hand:[1,first,second],drawn_card:second,deal_count:5}};
   b.run('acceptSnapshot(fixture)');assert.equal(b.get('autoDeal'),true);
   assert.equal(b.element('autoDealButton').textContent,'暂停摸牌');
-  assert.equal(b.timers.get(b.get('autoTimer')).delay,650);
+  assert.equal(b.timers.get(b.get('autoTimer')).delay,1000);
  }
+});
+
+test('same-draw public updates do not restart the 1000ms automatic draw deadline',()=>{
+ const b=browser(),data=snapshot();data.state.realtime_bidding=true;sit(b,data);
+ b.run('autoDeal=true;scheduleAutoDeal()');const old=b.timers.get(b.get('autoTimer')).fn;
+ b.advanceTime(200);b.context.fixture={...data,version:5,bot_thinking:true};b.run('acceptSnapshot(fixture)');
+ assert.equal(b.timers.get(b.get('autoTimer')).delay,800);
+ const count=b.requests.length;old();assert.equal(b.requests.length,count);
+ b.advanceTime(750);b.context.fixture={...data,version:6,bot_thinking:false};b.run('acceptSnapshot(fixture)');
+ assert.equal(b.timers.get(b.get('autoTimer')).delay,50);
+ b.advanceTime(50);b.timers.get(b.get('autoTimer')).fn();
+ assert.equal(JSON.parse(latest(b,'/api/action').options.body).action.type,'pass');
+});
+
+test('a realtime bid in flight preserves the automatic draw deadline',async()=>{
+ const b=browser(),data=snapshot();data.state.realtime_bidding=true;data.state.hand=[0,1];sit(b,data);
+ b.run('autoDeal=true;scheduleAutoDeal()');b.advanceTime(300);
+ const bidding=b.run("act({type:'bid',cards:[0]})");
+ b.advanceTime(800);latest(b,'/api/bid').reply({...data,version:5,state:{...data.state,bid:{player:0,strength:1,cards:[0]}}});
+ await bidding;assert.equal(b.timers.get(b.get('autoTimer')).delay,0);
+ b.timers.get(b.get('autoTimer')).fn();assert.ok(latest(b,'/api/action'));
+});
+
+test('cancel then reenable cannot fire a queued old draw and a new turn gets 1000ms',()=>{
+ const b=browser(),data=snapshot();data.state.realtime_bidding=true;sit(b,data);
+ b.run('autoDeal=true;scheduleAutoDeal()');const old=b.timers.get(b.get('autoTimer')).fn;
+ b.advanceTime(500);b.element('autoDealButton').onclick();b.element('autoDealButton').onclick();
+ assert.equal(b.timers.get(b.get('autoTimer')).delay,1000);
+ const count=b.requests.length;old();assert.equal(b.requests.length,count);
+ b.context.fixture={...data,version:5,state:{...data.state,current_player:3,deal_count:2}};b.run('acceptSnapshot(fixture)');
+ assert.equal(b.get('autoTimer'),null);
+ b.advanceTime(1000);b.context.fixture={...data,version:6,state:{...data.state,current_player:0,deal_count:5}};b.run('acceptSnapshot(fixture)');
+ assert.equal(b.timers.get(b.get('autoTimer')).delay,1000);
+});
+
+test('reenabling after legacy turn-bid selection starts a fresh draw delay',()=>{
+ const b=browser(),data=snapshot();sit(b,data);b.run('autoDeal=true;scheduleAutoDeal()');
+ b.advanceTime(1100);b.run('toggleCard(1)');assert.equal(b.get('autoDeal'),false);
+ b.element('autoDealButton').onclick();assert.equal(b.get('autoDeal'),true);
+ assert.equal(b.timers.get(b.get('autoTimer')).delay,1000);
 });
 
 test('ordinary draws keep auto dealing; repeats, old joker pairs and other players do not interrupt it',()=>{

@@ -1,0 +1,111 @@
+{
+  "date": "2026-10-12",
+  "python_tests": 171,
+  "frontend_tests": 81,
+  "passed": true,
+  "ai_fix": {
+    "reproduced": "level 2; partner leads spade ace pair plus queen; own hand consists of singleton trumps; point-bearing discards formerly omitted retained-control cost",
+    "regressions": "point-bearing partner feed plus compulsory off-suit point card with trump padding; handwritten and sampled-search policies",
+    "rules_unchanged": true
+  },
+  "auto_draw": {
+    "nominal_wait_ms": 650,
+    "same_draw_notifications_restart_delay": false,
+    "inflight_realtime_bid_preserves_deadline": true,
+    "pause_reenable_starts_fresh_delay": true,
+    "local_browser_measurements": {
+      "self": {
+        "interval_definition": "every consecutive card",
+        "samples": 17,
+        "minimum_ms": 658.5,
+        "mean_ms": 673.5,
+        "maximum_ms": 689.9,
+        "intervals_ms": [
+          669.0,
+          677.1,
+          658.5,
+          670.6,
+          689.6,
+          665.4,
+          685.6,
+          689.9,
+          685.0,
+          667.5,
+          664.0,
+          671.8,
+          661.1,
+          668.2,
+          677.7,
+          680.7,
+          668.3
+        ]
+      },
+      "pve": {
+        "interval_definition": "each successive card received by human seat 0, including three AI turns",
+        "samples": 23,
+        "minimum_ms": 1609.4,
+        "mean_ms": 1680.7,
+        "maximum_ms": 1871.2,
+        "intervals_ms": [
+          1609.4,
+          1691.3,
+          1674.2,
+          1677.6,
+          1683.5,
+          1683.7,
+          1676.9,
+          1691.2,
+          1677.7,
+          1674.4,
+          1614.8,
+          1680.4,
+          1685.0,
+          1871.2,
+          1677.5,
+          1624.4,
+          1684.9,
+          1613.5,
+          1732.8,
+          1689.5,
+          1683.5,
+          1681.2,
+          1676.9
+        ]
+      }
+    },
+    "observation_resolution_ms_approximately": 10,
+    "synthetic_notification_period_ms_in_self_mode": 180,
+    "existing_ai_delays_unchanged": true,
+    "public_network_not_measured": true
+  },
+  "counter_poll": {
+    "direction": [
+      "south 0",
+      "east 3",
+      "north 2",
+      "west 1"
+    ],
+    "post_burial_starts_after": "latest bury owner",
+    "excluded": [
+      "latest bury owner",
+      "current trump setter"
+    ],
+    "eligible_count": {
+      "same_person": 3,
+      "different_people": 2
+    },
+    "max_strength_big_joker_pair_skips_poll": true,
+    "prebottom_starts_at": "banker; single-level setter may still reinforce own suit",
+    "post_burial_owner_setter_combinations_tested": 16,
+    "prebottom_pair_bid_combinations_tested": 16
+  },
+  "browser": {
+    "console_errors_or_warnings_during_measurement": 0,
+    "screenshot": "auto-draw-clock-desktop.png"
+  },
+  "cleanup": {
+    "temporary_services_closed": true,
+    "temporary_tabs_closed": true,
+    "production_service_not_started": true
+  }
+}

@@ -3,10 +3,12 @@ import random
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from tractor_sim.engine import GameConfig, TractorEnv
 from tractor_sim.enoch import (AI_ID, EnochPolicy, Knowledge, candidates, choose_bury,
-                               rank_moves, sample_world, winner_so_far)
+                               rank_moves, sample_world, search_roots, search_value,
+                               winner_so_far)
 from tractor_sim.policy import RandomPolicy
 from tractor_sim.rules import validate_play
 from tractor_sim.server import Registry
@@ -129,6 +131,177 @@ class EnochRules(unittest.TestCase):
         before = env.export_state()
         policy.act(env.observe(env.current_player))
         self.assertEqual(before,env.export_state())
+
+    def test_unwinnable_partner_feed_keeps_level_card_over_ordinary_zero_point_trumps(self):
+        # Partner throws a pair plus a single. Our all-trump, pairless hand
+        # cannot ruff that structure; feeding the five must not waste the two.
+        hands = [c('S',2)+c('H',5)+c('H',12)+c('H',14),
+                 c('D',3,True)+c('D',4)+c('D',6),
+                 c('S',14,True)+c('S',12)+c('S',3),
+                 c('C',7,True)+c('C',8)+c('C',9)]
+        env = fixture(hands, level=2, trump='H', banker=2)
+        env.step({'type':'play','cards':hands[2][:3]},2)
+        env.step({'type':'play','cards':hands[1][:3]},1)
+        obs = env.observe(0)
+        for budget in (0,600):
+            for seed in range(3):
+                with self.subTest(budget=budget,seed=seed):
+                    move = EnochPolicy(seed,time_ms=budget,worlds=3).act(obs)['cards']
+                    validate_play(obs['hand'],move,obs['trick'][0]['cards'],2,'H')
+                    self.assertEqual(set(move),set(c('H',5)+c('H',12)+c('H',14)))
+                    self.assertNotEqual(winner_so_far(obs['trick']+[{'player':0,'cards':move}],2,'H'),0)
+
+    def test_mandatory_point_follow_does_not_waste_a_level_card_in_its_trump_padding(self):
+        for leader, me in ((0,3),(2,0)):
+            hands = [c('C',3,True)+c('C',4)+c('C',6),
+                     c('D',3,True)+c('D',4)+c('D',6),
+                     c('C',7,True)+c('C',8)+c('C',9),
+                     c('D',7,True)+c('D',8)+c('D',9)]
+            hands[leader] = c('S',14,True)+c('S',12)+c('S',3)
+            hands[me] = c('S',5)+c('S',2)+c('H',12)+c('H',14)
+            env = fixture(hands,level=2,trump='H',banker=leader)
+            env.step({'type':'play','cards':hands[leader][:3]},leader)
+            if env.current_player != me:
+                p = env.current_player;env.step({'type':'play','cards':env.hands[p][:3]},p)
+            obs = env.observe(me)
+            for budget in (0,600):
+                with self.subTest(leader=leader,budget=budget):
+                    move = EnochPolicy(7,time_ms=budget,worlds=3).act(obs)['cards']
+                    self.assertEqual(set(move),set(c('S',5)+c('H',12)+c('H',14)))
+
+    def test_zero_point_unwinnable_follow_preserves_level_control(self):
+        hands = [c('S',2)+c('H',6)+c('H',12)+c('H',14),
+                 c('D',3,True)+c('D',4)+c('D',6),
+                 c('S',14,True)+c('S',12)+c('S',3),
+                 c('C',7,True)+c('C',8)+c('C',9)]
+        env = fixture(hands,level=2,trump='H',banker=2)
+        env.step({'type':'play','cards':hands[2][:3]},2)
+        env.step({'type':'play','cards':hands[1][:3]},1)
+        obs = env.observe(0)
+        for budget in (0,600):
+            for seed in range(3):
+                with self.subTest(budget=budget,seed=seed):
+                    move = EnochPolicy(seed,time_ms=budget,worlds=3).act(obs)['cards']
+                    self.assertEqual(set(move),set(c('H',6)+c('H',12)+c('H',14)))
+
+    def test_spend_level_to_save_ten_when_enemy_cannot_be_beaten(self):
+        # An enemy joker pair cannot be beaten by three unpaired trumps. At
+        # 70 attacker points, protecting our ten is worth discarding a two.
+        hands = [c('S',2)+c('H',10)+c('H',12)+c('H',14),
+                 [53,107,52]+c('C',6),
+                 c('S',7,True)+c('S',8)+c('S',9),
+                 c('C',7,True)+c('C',8)+c('C',9)]
+        env = fixture(hands,level=2,trump='H',banker=0)
+        env.score = env.captured_score = 70
+        env.current_player = 1  # Enemy won the preceding trick.
+        env.step({'type':'play','cards':hands[1][:3]},1)
+        obs = env.observe(0)
+        for budget in (0,600):
+            move = EnochPolicy(2,time_ms=budget,worlds=3).act(obs)['cards']
+            self.assertEqual(set(move),set(c('S',2)+c('H',12)+c('H',14)))
+            self.assertNotEqual(winner_so_far(obs['trick']+[{'player':0,'cards':move}],2,'H'),0)
+
+    def test_level_can_win_enemy_ace_without_wasting_ordinary_trump(self):
+        # The 9999 replay contains this genuine takeover: last to act against
+        # an enemy trump ace. Keeping the two would concede the lead.
+        hands = [c('C',4)+c('S',4)+c('S',5),
+                 c('D',2)+c('C',12)+c('C',14),
+                 [105]+c('H',4)+c('H',5),
+                 c('C',9)+c('D',4)+c('D',5)]
+        env = fixture(hands,level=2,trump='C',banker=0)
+        for p in (0,3,2):
+            env.step({'type':'play','cards':hands[p][:1]},p)
+        obs = env.observe(1)
+        best = rank_moves(obs,candidates(obs,random.Random(0)))[0][1]
+        self.assertEqual(best,c('D',2))
+        self.assertEqual(winner_so_far(obs['trick']+[{'player':1,'cards':best}],2,'C'),1)
+
+    def test_leaf_preserves_level_control_in_zero_point_padding(self):
+        hands = [c('S',2)+c('H',6)+c('H',12)+c('H',14),
+                 c('D',3,True)+c('D',4)+c('D',6),
+                 c('S',14,True)+c('S',12)+c('S',3),
+                 c('C',7,True)+c('C',8)+c('C',9)]
+        env = fixture(hands,level=2,trump='H',banker=2)
+        env.step({'type':'play','cards':hands[2][:3]},2)
+        env.step({'type':'play','cards':hands[1][:3]},1)
+        obs = env.observe(0)
+        keep = copy.deepcopy(env); spend = copy.deepcopy(env)
+        keep.step({'type':'play','cards':c('H',6)+c('H',12)+c('H',14)},0)
+        spend.step({'type':'play','cards':c('H',6)+c('H',12)+c('S',2)},0)
+        for world in (keep,spend):
+            world.step({'type':'play','cards':hands[3][:3]},3)
+        self.assertEqual(keep.score,spend.score)
+        self.assertGreater(search_value(keep,obs),search_value(spend,obs))
+
+    def test_strong_partner_feeds_points_without_stealing_with_level(self):
+        hands = [c('C',2)+c('H',3)+c('H',10)+c('H',12),
+                 c('H',4)+c('S',4)+c('S',5)+c('S',6),
+                 [53,107]+c('H',5)+c('H',6),
+                 c('H',7)+c('S',7)+c('S',8)+c('S',9)]
+        env = fixture(hands,level=2,trump='H',banker=2)
+        env.step({'type':'play','cards':[53]},2)
+        env.step({'type':'play','cards':c('H',4)},1)
+        obs = env.observe(0)
+        for budget in (0,600):
+            move = EnochPolicy(2,time_ms=budget,worlds=3).act(obs)['cards']
+            self.assertEqual(move,c('H',10))
+
+    def test_search_keeps_structural_ruff_among_many_padding_choices(self):
+        hands = [[52,106]+c('C',2,True),
+                 c('D',2,True)+c('D',10,True)+c('H',7)+c('D',4)+c('D',8)+c('D',11),
+                 c('C',6)+c('C',8)+c('H',5)+c('C',5),
+                 c('S',13,True)+c('S',10,True)]
+        env = fixture(hands,level=2,trump='D',banker=3)
+        env.step({'type':'play','cards':hands[3]},3)
+        env.step({'type':'play','cards':hands[2]},2)
+        obs = env.observe(1)
+        ranked = rank_moves(obs,candidates(obs,random.Random(0)))
+        def wins(entry):
+            return winner_so_far(obs['trick']+[{'player':1,'cards':entry[1]}],2,'D') == 1
+        self.assertFalse(any(wins(entry) for entry in ranked[:2]))
+        roots = search_roots(obs,ranked,2)
+        self.assertEqual(roots[0],ranked[0])
+        self.assertEqual(len(roots),2)
+        self.assertTrue(any(wins(entry) for entry in roots))
+
+    def test_known_ruff_risk_changes_feeding_but_partner_security_restores_it(self):
+        hands = [c('S',14,True)+c('S',8)+c('S',9),
+                 c('H',6)+c('C',6)+c('C',7)+c('C',8),
+                 c('H',3)+c('H',4)+c('H',10)+c('C',2),
+                 c('S',4,True)+c('C',4)+c('C',5)]
+        env = fixture(hands,level=2,trump='H',banker=0)
+        env.step({'type':'play','cards':hands[0][:2]},0)
+        env.step({'type':'play','cards':hands[3][:2]},3)
+        obs = env.observe(2)
+        # These are public deductions normally established by earlier follows.
+        knowledge = Knowledge(obs);knowledge.voids[1].add('S')
+        moves = candidates(obs,random.Random(0))
+        self.assertEqual(set(rank_moves(obs,moves,knowledge)[0][1]),set(c('H',3)+c('H',4)))
+        knowledge.voids[1].add('T')
+        self.assertIn(c('H',10)[0],rank_moves(obs,moves,knowledge)[0][1])
+
+    def test_noisy_search_does_not_override_prior_on_one_lucky_world(self):
+        env = playing(8);obs = env.observe(env.current_player)
+        policy = EnochPolicy(1,time_ms=3000,worlds=2,root_candidates=2)
+        ranked = rank_moves(obs,candidates(obs,random.Random(0)))[:2]
+        # Equal priors isolate two paired world advantages (+100, -80).
+        # Their positive mean alone used to trigger a speculative override.
+        ranked[1] = (ranked[0][0],ranked[1][1])
+        with patch('tractor_sim.enoch.search_value',side_effect=[0,100,0,-80]):
+            selected = policy._search(obs,Knowledge(obs),ranked,time.monotonic())
+        self.assertEqual(policy.last_search['worlds'],2)
+        self.assertEqual(selected,ranked[0][1])
+
+    def test_consistent_search_advantage_can_still_override_prior(self):
+        env = playing(8);obs = env.observe(env.current_player)
+        policy = EnochPolicy(1,time_ms=3000,worlds=2,root_candidates=2)
+        ranked = rank_moves(obs,candidates(obs,random.Random(0)))[:2]
+        ranked[1] = (ranked[0][0],ranked[1][1])
+        with patch('tractor_sim.enoch.search_value',side_effect=[0,30,0,30]):
+            selected = policy._search(obs,Knowledge(obs),ranked,time.monotonic())
+        self.assertEqual(policy.last_search['worlds'],2)
+        self.assertEqual(selected,ranked[1][1])
+        self.assertTrue(policy.last_search['changed_prior'])
 
 
 class AsyncPolicies(unittest.TestCase):

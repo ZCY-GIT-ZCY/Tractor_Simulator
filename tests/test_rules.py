@@ -261,6 +261,32 @@ class EngineRules(unittest.TestCase):
         env.step({'type':'pass'})
         self.assertEqual((env.phase,env.current_player),('playing',1))
 
+    def test_every_bury_owner_and_trump_setter_counterclockwise_poll_combination(self):
+        for owner in range(4):
+            for bidder in range(4):
+                with self.subTest(owner=owner,bidder=bidder):
+                    env=dealt_bidding_env(owner,bidder)
+                    env.step({'type':'bury','cards':env.hands[owner][-8:]})
+                    expected=[(owner-i)%4 for i in range(1,4) if (owner-i)%4 != bidder]
+                    asked=[]
+                    while env.phase=='countering':
+                        asked.append(env.current_player);env.step({'type':'pass'})
+                    self.assertEqual(asked,expected)
+                    self.assertEqual(len(asked),3 if owner==bidder else 2)
+                    self.assertEqual((env.phase,env.current_player),('playing',owner))
+
+    def test_prebottom_pair_bid_skips_setter_and_polls_other_three_counterclockwise(self):
+        for banker in range(4):
+            for bidder in range(4):
+                with self.subTest(banker=banker,bidder=bidder):
+                    env=dealt_bidding_env(banker,bidder,bid_cards=c('H',2,True),confirm=False)
+                    expected=[(banker-i)%4 for i in range(4) if (banker-i)%4 != bidder]
+                    asked=[]
+                    while env.phase=='final_bidding':
+                        asked.append(env.current_player);env.step({'type':'pass'})
+                    self.assertEqual(asked,expected)
+                    self.assertEqual((env.phase,env.current_player),('burying',banker))
+
     def test_successive_counters_restart_at_next_seat(self):
         env=dealt_bidding_env(reserved=[c('H',2),c('S',2,True),[52,106],[]])
         env.step({'type':'bury','cards':env.hands[0][-8:]})

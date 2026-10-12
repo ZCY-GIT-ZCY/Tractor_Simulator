@@ -10,6 +10,7 @@ import os
 import random
 import time
 from collections import Counter, defaultdict
+from functools import lru_cache
 from itertools import combinations
 
 from .cards import face, rank, suit, power, points, effective_suit
@@ -29,6 +30,42 @@ def strength(card, level, trump):
     if r == level:
         return 998 if suit(card) == trump else 997
     return r
+
+
+@lru_cache(maxsize=2048)
+def score_utility(score):
+    """Smooth pressure at promotion bands, with extra weight on taking the table.
+
+    This is a preference, not a claim that 80 is reachable: remaining hand
+    points and the sampled bottom are accounted for by the actual rollout.
+    """
+    bands = sum(8 * math.tanh((score - boundary) / 10)
+                for boundary in (0, 40, 80, 120, 160, 200))
+    return score + bands + 24 * math.tanh((score - 80) / 10)
+
+
+def hand_control(hand, level, trump):
+    """Remaining control, including the referee's pair/tractor adjacency.
+
+    Point value is deliberately separate: a ten is costly to lose even when
+    it is a weak trump, and a level card can be worth spending to save it.
+    """
+    value = 0.
+    for card in hand:
+        r = rank(card)
+        if effective_suit(card, level, trump) == 'T':
+            value += (7.5 if r == 16 else 6.5 if r == 15 else
+                      5.5 if r == level and suit(card) == trump else
+                      5 if r == level else .8 + .15 * power(card, level, trump))
+        else:
+            value += 1.2 if r == 14 else .7 if r == 13 else .35 if r == 12 else .05
+    counts = Counter(map(face, hand))
+    paired = [c for c in hand if counts[face(c)] == 2]
+    for unit in components(paired, level, trump):
+        tr = effective_suit(unit['faces'][0], level, trump) == 'T'
+        value += (2 if tr else 1) * unit['pairs']
+        value += (2 if tr else 1.5) * max(0, unit['pairs'] - 1)
+    return value
 
 
 def bid_strength(hand, level, trump):
@@ -248,6 +285,46 @@ def rank_moves(o, moves, knowledge=None):
     pot = sum(points(c) for play in o["trick"] for c in play["cards"])
     attack = me % 2 != o["banker"] % 2
 
+    def locked_winner(trick):
+        """Conservative public proof against opponents still to act.
+
+        A high side-suit play alone is not a proof: an opponent may be void
+        and ruff, even if that void has not yet been revealed.
+        """
+        winner = winner_so_far(trick, level, trump)
+        enemies = [p for p in after if p % 2 != winner % 2]
+        if not enemies:
+            return True
+        held = next(p['cards'] for p in trick if p['player'] == winner)
+        lead = trick[0]['cards']
+        units = components(lead,level,trump)
+        largest = units[0]['pairs']
+        top = matched_max(held,units,level,trump)
+        held_door = effective_suit(held[0],level,trump)
+
+        def possible_tops(door):
+            pool = [c for c in k.unseen if effective_suit(c,level,trump) == door]
+            if len(pool) < len(lead):
+                return []
+            if not largest:
+                return [power(c,level,trump) for c in pool]
+            pf = tuple(sorted(f for f,n in Counter(map(face,pool)).items() if n == 2))
+            # A beating largest unit is necessary, but not sufficient for a
+            # complete match. Overestimating the threat keeps the proof safe.
+            return [power(run[-1],level,trump) for run in blocks(pf,level,trump)
+                    if len(run) == largest]
+
+        if top is None or any(candidate > top for candidate in possible_tops(held_door)):
+            return False
+        if held_door == 'T' or not possible_tops('T'):
+            return True
+        door = effective_suit(lead[0], level, trump)
+        return all('T' in k.voids[p] or
+                   any(effective_suit(c, level, trump) == door for c in k.exposed[p])
+                   for p in enemies)
+
+    locked = locked_winner(o['trick']) if o['trick'] else False
+
     def retention(c):
         s = strength(c, level, trump)
         return (18 if s >= 999 else 13 if s >= 997 else
@@ -292,19 +369,19 @@ def rank_moves(o, moves, knowledge=None):
         would_win = winner_so_far(o["trick"] + [{"player": me, "cards": cs}], level, trump) == me
         door = effective_suit(o["trick"][0]["cards"][0], level, trump)
         threat = any(p % 2 != me % 2 and door in k.voids[p] and "T" not in k.voids[p] for p in after) and door != "T"
-        incumbent = next(p["cards"] for p in o["trick"] if p["player"] == current)
-        locked = k.safe_unit(incumbent) and not threat
-        mine_locks = k.safe_unit(cs) and not threat and {effective_suit(c, level, trump) for c in cs} == {door}
+        mine_locks = would_win and locked_winner(o['trick'] + [{'player': me, 'cards': cs}])
         max_cost = sum(map(retention, cs))
+        point_impact = score_utility(o['score'] + pot + value) - score_utility(o['score'] + pot)
         result = -breaks * 4
         if partner:
-            result += value*(3.5 if locked else 1.5 if opp_after else 3)
+            result += point_impact*(3.5 if locked else 1.5)
             if threat:
-                result -= value*5
+                result -= point_impact*5
             if would_win and (locked or not mine_locks):
                 result -= 15 if opp_after or locked else 12
-            if not would_win and not value:
-                result -= max_cost
+            # A takeover that adds real security may spend control. An
+            # unnecessary takeover pays the same cost as ordinary padding.
+            result -= max_cost * (.12 if would_win and not locked else 1)
         elif would_win:
             result += 6 + pot*.8 - min(st,20)*.01
             if door != "T" and {effective_suit(c, level, trump) for c in cs} == {"T"}:
@@ -314,7 +391,7 @@ def rank_moves(o, moves, knowledge=None):
                 result -= min(st,20)*.03
             result -= max_cost * .08
         else:
-            result -= value*4 + max_cost
+            result -= point_impact*4 + max_cost
             if not after:
                 result -= value
             if not attack and o["score"] < 80 <= o["score"] + pot + value:
@@ -331,6 +408,25 @@ def rank_moves(o, moves, knowledge=None):
         return result
 
     return sorted(((score(cs), cs) for cs in moves), key=lambda x: (-x[0], tuple(sorted(map(face,x[1])))))
+
+
+def search_roots(o, ranked, limit):
+    """Keep a winning and a ducking option when both exist in a follow.
+
+    Many nearly identical padding moves can otherwise crowd every structural
+    ruff out of the bounded search, even when it is needed to save the pot.
+    """
+    roots = ranked[:limit]
+    if o['trick'] and len(roots) >= 2:
+        def wins(entry):
+            return winner_so_far(o['trick'] + [{'player': o['player'], 'cards': entry[1]}],
+                                 o['level'],o['trump']) == o['player']
+        category = wins(roots[0])
+        if all(wins(entry) == category for entry in roots):
+            alternative = next((entry for entry in ranked[limit:] if wins(entry) != category),None)
+            if alternative is not None:
+                roots[-1] = alternative
+    return roots
 
 
 def sample_world(o, rng, knowledge=None):
@@ -412,7 +508,7 @@ def sample_world(o, rng, knowledge=None):
 def search_value(env, o):
     attack = o["player"] % 2 != o["banker"] % 2
     sign = 1 if attack else -1
-    value = sign*(env.score-o["score"])
+    value = sign*(score_utility(env.score)-score_utility(o['score']))
     if env.phase in ("round_end", "match_end"):
         result = env.result
         value += 70 if result["winner"] == o["player"] % 2 else -70
@@ -424,11 +520,16 @@ def search_value(env, o):
         if env.match_winner is not None:
             value += 400 if env.match_winner == myteam else -400
     else:
-        # Modest leaf control; do not pretend an unfinished rollout won a round.
+        # Strong trumps and structures have different future value. Reduce
+        # this value when there are few points left to protect, retaining some
+        # end-control value; hidden bottom points come from this sampled world.
+        remaining_points = sum(points(c) for hand in env.hands for c in hand)
+        weight = .35 + .65 * min(1, (remaining_points + 2*sum(map(points,env.kitty))) / 40)
+        if env.level in (11,14):
+            weight = 1  # J/A last-trick control still matters without points.
         for p, hand in enumerate(env.hands):
             direction = 1 if p % 2 == o["player"] % 2 else -1
-            value += direction * sum(2 if effective_suit(c,env.level,env.trump) == "T"
-                                     else .8 if rank(c) == 14 else .05 for c in hand)
+            value += direction * weight * hand_control(hand,env.level,env.trump)
     return value
 
 
@@ -490,8 +591,8 @@ class EnochPolicy:
         return copy.deepcopy(action) if value >= 10 else {"type": "pass"}
 
     def _search(self, o, k, ranked, start):
-        roots = ranked[:self.root_candidates]
-        totals = [0.] * len(roots)
+        roots = search_roots(o,ranked,self.root_candidates)
+        differences = [[] for _ in roots]
         completed = 0
         deadline = start + self.time_ms/1000
         # Same sampled world and same rollout RNG for EVERY root. Only completed
@@ -523,12 +624,25 @@ class EnochPolicy:
             if len(batch) != len(roots):
                 break
             for i,value in enumerate(batch):
-                totals[i] += value
+                differences[i].append(value - batch[0])
             completed += 1
         self.last_search["worlds"] = completed
         if not completed:
             return roots[0][1]
-        # Retain the hand-written prior: shallow noisy worlds should not erase
-        # pair conservation, partner feeding or the ban on speculative throws.
-        best = max(range(len(roots)),key=lambda i: totals[i]/completed + roots[i][0]*.6)
+        # Compare paired differences in the very same unknown-card worlds.
+        # A noisy lucky sample should not erase a sensible hand-written prior.
+        means = [sum(ds)/completed for ds in differences]
+        errors = [math.sqrt(sum((d-mean)**2 for d in ds)/(completed*(completed-1)))
+                  if completed > 1 else 0 for ds,mean in zip(differences,means)]
+        penalties = [0 if i == 0 else .5*error + 4/math.sqrt(completed)
+                     for i,error in enumerate(errors)]
+        scores = [mean + .6*(roots[i][0]-roots[0][0]) - penalties[i]
+                  for i,mean in enumerate(means)]
+        best = max(range(len(roots)),key=lambda i: scores[i])
+        # Aggregate diagnostics only, no sampled hands or alternative private
+        # cards. These stay on the policy instance, outside browser snapshots.
+        self.last_search.update(selected_index=best, changed_prior=bool(best),
+                                paired_delta=round(means[best],3),
+                                paired_stderr=round(errors[best],3),
+                                confidence_penalty=round(penalties[best],3))
         return roots[best][1]

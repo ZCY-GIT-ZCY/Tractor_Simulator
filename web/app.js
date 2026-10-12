@@ -9,7 +9,7 @@ const suit=id=>face(id)<52?suits[Math.floor(face(id)/13)]:null;
 const label=r=>labels[r]||String(r);
 const cardName=id=>rank(id)>14?label(rank(id)):symbols[suits.indexOf(suit(id))]+label(rank(id));
 let mode='self', token=sessionStorage.getItem('tractor_session'), snap=null, selected=new Set(), busy=false;
-let handKey='', selectionScopeKey='', forcedSelectionKey='', validationTicket=0, pollGeneration=0, closedResult=null, autoDeal=false, autoTimer=null, toastTimer;
+let handKey='', selectionScopeKey='', forcedSelectionKey='', validationTicket=0, pollGeneration=0, closedResult=null, autoDeal=false, autoTimer=null, autoDrawKey='', autoDrawDue=0, toastTimer;
 let previousHands=[new Set(),new Set(),new Set(),new Set()], previousPlay='';
 let drawTurnKey='', visibleDraw=null;
 let bidNoticeTimer;
@@ -361,10 +361,15 @@ async function confirmResult(){
 }
 function scheduleAutoDeal(){
  clearTimeout(autoTimer);
- if(autoDeal&&snap?.state?.phase==='dealing'&&!dealingComplete()&&isMyTurn()&&(!selected.size||snap.state.realtime_bidding)&&!busy){
-  const scope=sessionScope(),draw=`${snap.room}|${snap.state.round}|${snap.state.redeals}|${snap.state.deal_count}`;
-  autoTimer=setTimeout(()=>{if(currentSession(scope)&&autoDeal&&snap?.state?.phase==='dealing'&&!dealingComplete()&&isMyTurn()&&(!selected.size||snap.state.realtime_bidding)&&!busy&&draw===`${snap.room}|${snap.state.round}|${snap.state.redeals}|${snap.state.deal_count}`)return act({type:'pass'});},650);
- }
+ autoTimer=null;
+ if(!autoDeal||snap?.state?.phase!=='dealing'||dealingComplete()||!isMyTurn()||selected.size&&!snap.state.realtime_bidding){autoDrawKey='';autoDrawDue=0;return;}
+ const scope=sessionScope(),draw=`${snap.room}|${snap.state.round}|${snap.state.redeals}|${snap.state.deal_count}`;
+ const key=`${scope.token}|${scope.generation}|${draw}`;
+ if(key!==autoDrawKey){autoDrawKey=key;autoDrawDue=Date.now()+1000;}
+ if(busy)return;
+ // Public bids and AI-thinking snapshots must not restart this draw's delay.
+ const timer=setTimeout(()=>{if(autoTimer!==timer)return;autoTimer=null;if(currentSession(scope)&&autoDrawKey===key&&autoDeal&&snap?.state?.phase==='dealing'&&!dealingComplete()&&isMyTurn()&&(!selected.size||snap.state.realtime_bidding)&&!busy&&draw===`${snap.room}|${snap.state.round}|${snap.state.redeals}|${snap.state.deal_count}`)return act({type:'pass'});},Math.max(0,autoDrawDue-Date.now()));
+ autoTimer=timer;
 }
 async function poll(generation){
  while(token&&generation===pollGeneration){
@@ -373,7 +378,7 @@ async function poll(generation){
  }
 }
 function resetUI(){
- pollGeneration++;validationTicket++;token=null;sessionStorage.removeItem('tractor_session');snap=null;selected.clear();busy=false;$('passButton').disabled=false;autoDeal=false;clearTimeout(autoTimer);
+ pollGeneration++;validationTicket++;token=null;sessionStorage.removeItem('tractor_session');snap=null;selected.clear();busy=false;$('passButton').disabled=false;autoDeal=false;clearTimeout(autoTimer);autoTimer=null;autoDrawKey='';autoDrawDue=0;
  clearTimeout(biddingTimer);biddingEndAt=0;
  handKey='';selectionScopeKey='';forcedSelectionKey='';closedResult=null;previousHands=[new Set(),new Set(),new Set(),new Set()];previousPlay='';
  tentativeSeat=null;seatBusy=false;roomManagerOpen=false;$('roomSeatsButton').hidden=true;$('lobbyError').textContent='';
@@ -414,7 +419,7 @@ $('roomSeatsButton').onclick=()=>{roomManagerOpen=true;renderLobby();};
 $('closeRoomSeats').onclick=()=>{roomManagerOpen=false;renderLobby();};
 $('passButton').onclick=()=>act({type:'pass'});
 $('randomButton').onclick=()=>act({type:'random'});
-$('autoDealButton').onclick=()=>{autoDeal=!autoDeal;selected.clear();renderHand();validateSelection();updateAutoDeal();scheduleAutoDeal();};
+$('autoDealButton').onclick=()=>{autoDeal=!autoDeal;autoDrawKey='';autoDrawDue=0;selected.clear();renderHand();validateSelection();updateAutoDeal();scheduleAutoDeal();};
 $('autoplayButton').onclick=async()=>{if(!snap||takeoverBusy)return;const scope=sessionScope();takeoverBusy=true;$('autoplayButton').disabled=true;try{const data=await api('/api/autoplay',{enabled:!(mode==='pvp'?isTakeover():snap.autoplay)});if(currentSession(scope))acceptSnapshot(data);}catch(e){if(currentSession(scope))toast(e.message);}finally{if(currentSession(scope)){takeoverBusy=false;$('autoplayButton').disabled=false;}}};
 async function leaveSession(){
  if(!token)return;if($('leaveButton').disabled)return;

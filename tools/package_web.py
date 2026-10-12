@@ -33,6 +33,8 @@ def main():
                  "realtime-bidding-desktop.png", "realtime-bidding-mobile.png",
                  "bidding-grace-desktop.png", "bidding-grace-mobile.png", "bidding-grace-validation.json",
                  "pvp-ai-takeover-desktop.png", "pvp-ai-takeover-mobile.png", "pvp-takeover-validation.json",
+                 "auto-draw-clock-desktop.png", "ai-feed-and-draw-validation.json",
+                 "ai-control-validation.json",
                  "frontend.png", "frontend-draw.png", "frontend-debug-reconnect.png",
                  "frontend-final-bidding.png", "frontend-pve-draw.png", "web-desktop-game.png",
                  "web-desktop-invite.png", "web-live-invite.png", "web-mobile-game.png",
