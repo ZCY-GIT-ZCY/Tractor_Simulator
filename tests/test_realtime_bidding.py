@@ -125,7 +125,8 @@ class BiddingGraceClock(unittest.TestCase):
     def room(self, auction=True):
         room=Room('clock_fixture','self',GameConfig(2,auction,0),seed=0)
         room.join('clock player',0)
-        self.enterContext(room.condition)
+        room.condition.acquire()
+        self.addCleanup(room.condition.release)
         room.env=waiting_deal();room.env.auction=auction
         return room
 
