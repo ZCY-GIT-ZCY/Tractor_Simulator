@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-12",
+  "python": {"tests": 167, "passed": true},
+  "frontend": {"tests": 77, "passed": true},
+  "auto_deal": {
+    "interval_ms": 650,
+    "new_level_card_continues": true,
+    "new_joker_pair_continues": true,
+    "realtime_preselection_and_bid_continues": true,
+    "stops_at_dealing_complete": true
+  },
+  "pvp_takeover": {
+    "own_confirmed_seat_only": true,
+    "policy": "Existing Enoch table-rules policy; strategy unchanged",
+    "public_badge": true,
+    "human_seat_and_private_cards_preserved": true,
+    "cancellation_invalidates_inflight_decision": true,
+    "rapid_cancel_reenable_invalidates_old_decision": true,
+    "delegated_disconnect_does_not_pause": true,
+    "nondelegated_disconnect_still_pauses": true,
+    "human_banker_manual_settlement_confirmation_preserved": true
+  },
+  "browser": {
+    "real_clients": 2,
+    "enable_while_other_player_acts": true,
+    "actual_enoch_follow": {"hand_before": 25, "hand_after": 24, "next_player_changed": true},
+    "peer_sees_badge": true,
+    "cancel_restores_manual_selection": true,
+    "peer_sees_badge_removed": true,
+    "mobile_viewport": {"width": 390, "height": 844},
+    "mobile_horizontal_overflow": false,
+    "console_errors_or_warnings": 0,
+    "screenshots": ["pvp-ai-takeover-desktop.png", "pvp-ai-takeover-mobile.png"]
+  },
+  "level3_replay_audit": {
+    "accepted_order": [
+      "Player originally bids single spade level card",
+      "Banker buries; current trump setter correctly skipped under no-self-counter rule",
+      "Banker's partner counters with paired small jokers and buries",
+      "Two intervening players pass",
+      "Original trump setter counters with paired big jokers and buries"
+    ],
+    "server_poll_order_correct": true,
+    "regression_added": true,
+    "self_counter_skip_explanation_added_to_ui": true,
+    "historical_browser_rendering_not_provable_from_server_record": true,
+    "personal_replay_excluded_from_package": true
+  },
+  "cleanup": {
+    "production_service_and_tunnel_stopped": true,
+    "temporary_service_stopped": true,
+    "temporary_browser_tabs_closed": true
+  }
+}

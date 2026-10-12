@@ -15,6 +15,7 @@ let drawTurnKey='', visibleDraw=null;
 let bidNoticeTimer;
 let biddingTimer=null,biddingEndAt=0;
 let tentativeSeat=null,seatBusy=false,roomManagerOpen=false;
+let takeoverBusy=false;
 const seatDirections=['南','西','北','东'];
 let publicURL='', remembered=null;
 const invitedRoom=new URLSearchParams(location.search).get('room');
@@ -41,7 +42,8 @@ async function api(path,data){
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
 function nameOf(seat){return seat==null?snap?.name||'待选座':snap?.players[seat]?.name||`${seat} 座`;}
 function position(seat){return ['south','west','north','east'][(seat-(snap?.mode==='self'?0:snap?.seat||0)+4)%4];}
-function isMyTurn(){return !!snap?.started&&!!snap.state&&!snap.paused&&snap.controlled.includes(snap.state.current_player);}
+function isTakeover(){return mode==='pvp'&&!!snap?.takeover;}
+function isMyTurn(){return !!snap?.started&&!!snap.state&&!snap.paused&&!isTakeover()&&snap.controlled.includes(snap.state.current_player);}
 function isTrump(id){const s=snap?.state;return s&&(rank(id)>14||rank(id)===s.level||(s.trump&&suit(id)===s.trump));}
 function leadRequirement(){
  const s=snap?.state,lead=s?.trick?.[0]?.cards;
@@ -74,7 +76,7 @@ function renderPlayers(){
      `<div class="side-hand">${visible.map(c=>`<div class="card-chip ${suit(c)==='H'||suit(c)==='D'?'red':''}" title="${cardName(c)}">${label(rank(c))}<span>${rank(c)>14?'✦':symbols[suits.indexOf(suit(c))]}</span></div>`).join('')}</div>`;
   }else if(pos!=='south'&&s.hand_counts[p.seat])hand='<div class="hidden-stack"></div>';
   if(visible)previousHands[p.seat]=new Set(visible);
-  return `<div class="seat ${pos} ${active?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${banker===p.seat?'<b class="banker-badge">庄</b>':''}</strong><small>${s.hand_counts[p.seat]} 张 · ${p.seat%2?'金队':'青队'}${!p.online?' · 离线':''}</small></div></div>${hand}</div>`;
+  return `<div class="seat ${pos} ${active?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${banker===p.seat?'<b class="banker-badge">庄</b>':''}</strong>${p.takeover?'<span class="ai-control-badge">AI 托管</span>':''}<small>${s.hand_counts[p.seat]} 张 · ${p.seat%2?'金队':'青队'}${!p.online?' · 离线':''}</small></div></div>${hand}</div>`;
  }).join('');
 }
 function renderPlays(){
@@ -116,7 +118,7 @@ function renderSettlement(){
 }
 function activeHand(){return displayHand(snap.mode==='self'?snap.state.hands[snap.state.current_player]:snap.state.hand);}
 function dealingComplete(){return snap?.state?.phase==='dealing'&&!!snap.state.bidding_window?.complete;}
-function canBidNow(){return !!snap?.started&&!!snap.state&&!snap.paused&&snap.state.phase==='dealing'&&!!snap.state.realtime_bidding&&(!dealingComplete()||biddingEndAt>Date.now())&&(mode==='self'||snap.controlled.includes(snap.seat));}
+function canBidNow(){return !!snap?.started&&!!snap.state&&!snap.paused&&!isTakeover()&&snap.state.phase==='dealing'&&!!snap.state.realtime_bidding&&(!dealingComplete()||biddingEndAt>Date.now())&&(mode==='self'||snap.controlled.includes(snap.seat));}
 function updateBiddingCountdown(){
  clearTimeout(biddingTimer);
  if(!dealingComplete())return;
@@ -125,10 +127,10 @@ function updateBiddingCountdown(){
  if(!snap.paused&&remaining<=0){++validationTicket;$('submitButton').disabled=true;return;}
  if(!snap.paused)biddingTimer=setTimeout(updateBiddingCountdown,100);
 }
-function canSelectHand(){return !!snap?.started&&!!snap.state&&!snap.paused&&!busy&&(isMyTurn()&&!['round_end','match_end'].includes(snap.state.phase)||mode!=='self'&&['playing','dealing'].includes(snap.state.phase));}
+function canSelectHand(){return !!snap?.started&&!!snap.state&&!snap.paused&&!busy&&!isTakeover()&&(isMyTurn()&&!['round_end','match_end'].includes(snap.state.phase)||mode!=='self'&&['playing','dealing'].includes(snap.state.phase));}
 function toggleCard(c){
  if(!canSelectHand()||!activeHand().includes(c))return;
- autoDeal=false;clearTimeout(autoTimer);updateAutoDeal();
+ if(!snap.state.realtime_bidding){autoDeal=false;clearTimeout(autoTimer);updateAutoDeal();}
  selected.has(c)?selected.delete(c):selected.add(c);syncSelection();validateSelection();
 }
 function renderHand(){
@@ -189,7 +191,7 @@ function renderFeed(){
  $('bidSummary').innerHTML=bid?`${esc(nameOf(bid.player))} · ${bid.cards.map(cardName).join(' ')}<br>亮主强度 ${bid.strength} / 4`:'尚未亮主 · 首次须用级牌';
  if((isMyTurn()||canBidNow())&&s.bid_options.length){
   $('bidSummary').innerHTML+='<div class="bid-chips">'+s.bid_options.map((a,i)=>`<button class="bid-chip" data-bid="${i}">${a.cards.map(cardName).join(' ')}</button>`).join('')+'</div>';
-  for(const b of $('bidSummary').querySelectorAll('[data-bid]'))b.onclick=()=>{selected=new Set(s.bid_options[Number(b.dataset.bid)].cards);autoDeal=false;updateAutoDeal();renderHand();validateSelection();};
+  for(const b of $('bidSummary').querySelectorAll('[data-bid]'))b.onclick=()=>{selected=new Set(s.bid_options[Number(b.dataset.bid)].cards);renderHand();validateSelection();};
  }
 }
 function renderResult(){
@@ -268,7 +270,8 @@ function acceptSnapshot(data){
  const s=snap.state;
  clearTimeout(biddingTimer);
  biddingEndAt=Date.now()+Math.max(0,s.bidding_window?.remaining_seconds||0)*1000;
- stopAutoDealOnDraw(previous);
+ syncAutoDealPhase();
+ if(previous?.takeover!==snap.takeover)selected.clear();
  const nextKey=`${s.round}|${s.phase}|${s.trick_no}|${s.current_player}|${activeHand().join(',')}`;
  const scopeKey=`${snap.room}|${s.round}|${s.redeals}|${s.phase}|${snap.seat}`;
  if(mode!=='self'&&['playing','dealing'].includes(s.phase)){
@@ -291,17 +294,18 @@ function acceptSnapshot(data){
  $('tableHint').textContent=s.phase==='dealing'?`已发 ${s.deal_count} / 100 张`:`第 ${s.trick_no+(['round_end','match_end'].includes(s.phase)?0:1)} 轮 · 打 ${label(s.level)}`;
  $('trickCount').textContent=s.trick_no+' 轮';
  $('tableStatus').textContent=snap.paused?(snap.pause_reason==='policy_error'?'自动策略已暂停，请检查服务端日志':'有玩家离线，原座位保留，重连后继续'):s.phase==='playing'?(s.trick.length?`${nameOf(s.current_player)} 须跟 ${s.trick[0].cards.length} 张`:`${nameOf(s.current_player)} 领出`):s.phase==='burying'?`${nameOf(s.current_player)} 选择八张扣底`:s.phase==='final_bidding'?`${nameOf(s.current_player)} 是否反主或加固？`:s.phase==='countering'?`${nameOf(s.current_player)} 是否反底？`:s.phase==='dealing'?`${nameOf(s.current_player)} 摸牌 · 可亮主`:'本局已结束';
- $('turnHint').textContent=['round_end','match_end'].includes(s.phase)?(snap.settlement?.confirmed?'本局结束 · 点击阶段标签查看结算':'本局结束 · 先核对底牌和计分'):dealingComplete()?'所有牌已摸完 · 六秒内仍可亮主 / 反主':snap.autoplay?(mode==='pve'?`${snap.ai?.name||'AI'}托管中，可随时暂停`:'随机策略托管中，可随时暂停'):canBidNow()?`${nameOf(s.current_player)} 正在摸牌 · 你可随时亮主 / 反主`:snap.bot_thinking?`${nameOf(s.current_player)} 正在思考…`:isMyTurn()?`${nameOf(s.current_player)} 行动 · Enter 提交`:`等待 ${nameOf(s.current_player)} 行动`;
+ $('turnHint').textContent=['round_end','match_end'].includes(s.phase)?(snap.settlement?.confirmed?'本局结束 · 点击阶段标签查看结算':'本局结束 · 先核对底牌和计分'):isTakeover()?`${snap.ai?.name||'AI'} 正在托管你的座位 · 可随时取消`:dealingComplete()?'所有牌已摸完 · 六秒内仍可亮主 / 反主':snap.autoplay?(mode==='pve'?`${snap.ai?.name||'AI'}托管中，可随时暂停`:'随机策略托管中，可随时暂停'):canBidNow()?`${nameOf(s.current_player)} 正在摸牌 · 你可随时亮主 / 反主`:snap.bot_thinking?`${nameOf(s.current_player)} 正在思考…`:isMyTurn()?`${nameOf(s.current_player)} 行动 · Enter 提交`:`等待 ${nameOf(s.current_player)} 行动`;
  $('handTitle').textContent=(mode==='self'?`${s.current_player} 座 · ${nameOf(s.current_player)} 的手牌`:'你的手牌')+` · 本局打 ${label(s.level)}`;
- $('handSubtitle').textContent=s.phase==='burying'?'选择八张扣底':canBidNow()?'可随时预选并亮主／反主；当前定主者仅可同门加固':s.phase==='dealing'||s.phase==='final_bidding'||s.phase==='countering'?'选择级牌／王对亮牌，或不亮':!isMyTurn()&&mode!=='self'?'可提前预选，轮到你时确认出牌':'点击选择，再次点击取消';
+ $('handSubtitle').textContent=isTakeover()?'AI 正在操作，取消托管后恢复手动':s.phase==='burying'?'选择八张扣底':canBidNow()?'可随时预选并亮主／反主；当前定主者仅可同门加固':s.phase==='dealing'||s.phase==='final_bidding'||s.phase==='countering'?'选择级牌／王对亮牌，或不亮':!isMyTurn()&&mode!=='self'?'可提前预选，轮到你时确认出牌':'点击选择，再次点击取消';
  $('kittyArea').innerHTML=s.kitty_public&&s.kitty?.length?`公开底牌<div style="display:flex">${s.kitty.map(c=>cardHTML(c)).join('')}</div>`:s.phase==='burying'?'底牌已收入手中':`底牌 · 8 张${s.kitty_owner!=null?'已扣下':''}`;
  $('kittyArea').hidden=false;
  $('passButton').hidden=dealingComplete()||!isMyTurn()||!['dealing','final_bidding','countering'].includes(s.phase);
  $('passButton').textContent=s.phase==='dealing'?(s.realtime_bidding?'继续摸牌':'不亮，继续摸牌'):'不反';
  $('autoDealButton').hidden=dealingComplete()||!isMyTurn()||s.phase!=='dealing';updateAutoDeal();
  $('randomButton').hidden=dealingComplete()||!isMyTurn()||!['dealing','final_bidding','countering','burying','playing'].includes(s.phase)||mode==='pvp';
- $('autoplayButton').hidden=mode==='pvp'||['round_end','match_end'].includes(s.phase);
- $('autoplayButton').textContent=snap.autoplay?'暂停托管':'托管本局';$('autoplayButton').classList.toggle('is-active',snap.autoplay);
+ $('autoplayButton').hidden=mode!=='pvp'&&['round_end','match_end'].includes(s.phase);
+ $('autoplayButton').textContent=mode==='pvp'?(isTakeover()?'取消 AI 托管':'AI 接管'):snap.autoplay?'暂停托管':'托管本局';
+ $('autoplayButton').classList.toggle('is-active',mode==='pvp'?isTakeover():snap.autoplay);$('autoplayButton').disabled=takeoverBusy;
  renderDraw();renderPlayers();renderPlays();renderHand();renderFeed();renderSettlement();renderResult();validateSelection();scheduleAutoDeal();updateBiddingCountdown();
 }
 function validationUI(title,detail,error=false){$('validationTitle').textContent=title;$('validationDetail').textContent=detail;$('validation').classList.toggle('error',error);$('validation').querySelector('.validation-icon').textContent=error?'!':'·';}
@@ -314,9 +318,10 @@ async function validateSelection(){
  const ownBid=s.bid&&s.bid.player===(mode==='self'?s.current_player:snap.seat);
  $('submitButton').innerHTML=(s.phase==='burying'?'确认扣底':['dealing','final_bidding'].includes(s.phase)&&ownBid?'加固':s.phase==='dealing'&&s.realtime_bidding?'亮主 / 反主':['dealing','final_bidding','countering'].includes(s.phase)?'亮牌':['round_end','match_end'].includes(s.phase)?'查看结算':'出牌')+' <span>↗</span>';
  if(['round_end','match_end'].includes(s.phase)){validationUI('本局已结束',snap.settlement&&!snap.settlement.confirmed?'请先核对底牌，等待本局庄家确认':'点击阶段标签查看结算');return;}
+ if(isTakeover()){validationUI('AI 托管中','你仍可查看自己的手牌；取消 AI 托管后即可手动操作');return;}
  const realtime=canBidNow();
  if(dealingComplete()&&!snap.paused&&biddingEndAt<=Date.now()){validationUI('实时亮主已结束','等待服务器确定主牌和后续阶段');return;}
- if(!isMyTurn()&&!realtime){validationUI(snap.paused?'等待重新连接':['playing','dealing'].includes(s.phase)&&selected.size?`已预选 ${selected.size} 张 · 等待轮到你`:'等待牌友',snap.paused?'重连后保留原座位和手牌':s.phase==='playing'?`${nameOf(s.current_player)} 正在行动；轮到你时核对跟牌要求`:`${nameOf(s.current_player)} 正在行动`);return;}
+ if(!isMyTurn()&&!realtime){if(s.phase==='countering'&&ownBid){validationUI('当前主由你确定，不能反自己','本轮不询问你；其他人反主并扣底后，将按新主重新轮询');return;}validationUI(snap.paused?'等待重新连接':['playing','dealing'].includes(s.phase)&&selected.size?`已预选 ${selected.size} 张 · 等待轮到你`:'等待牌友',snap.paused?'重连后保留原座位和手牌':s.phase==='playing'?`${nameOf(s.current_player)} 正在行动；轮到你时核对跟牌要求`:`${nameOf(s.current_player)} 正在行动`);return;}
  if(!selected.size){validationUI(s.phase==='burying'?'请选择八张扣底':'请选择牌',['dealing','final_bidding'].includes(s.phase)&&ownBid?(s.bid.strength===1?'当前主由你确定，仅可加固同花色级牌对子':'当前主由你确定，不能反自己；等待其他牌友反主'):s.phase==='dealing'?(s.bid?'反主须严格提高当前亮主强度':'首次亮主须为级牌，王只能反主'):s.phase==='final_bidding'?'拿底前反主须严格提高强度':s.phase==='countering'?'反主须严格高于当前强度':s.trick.length?leadRequirement()+'，优先同门同型':'可出单张、对子、拖拉机或同门甩牌');return;}
  validationUI(`已选 ${selected.size} 张`,'正在核对牌型…');
  try{
@@ -331,7 +336,7 @@ async function validateSelection(){
  }catch(e){if(ticket!==validationTicket)return;validationUI('暂时无法提交',e.message,true);if(e.code==='STALE'){try{const data=await api('/api/state');if(ticket===validationTicket)acceptSnapshot(data);}catch{}}}
 }
 async function act(action){
- if(busy||!snap)return;
+ if(busy||!snap||isTakeover()&&action.type!=='next_round')return;
  const scope=sessionScope();
  busy=true;$('submitButton').disabled=true;$('passButton').disabled=true;
  // Do not fall back to the turn API when a local countdown just expired.
@@ -342,22 +347,10 @@ async function act(action){
  finally{if(currentSession(scope)){busy=false;$('passButton').disabled=false;if(snap?.state)renderHand();validateSelection();scheduleAutoDeal();}}
 }
 function updateAutoDeal(){$('autoDealButton').textContent=autoDeal?'暂停摸牌':'自动摸牌';$('autoDealButton').classList.toggle('is-active',autoDeal);}
-function stopAutoDealOnDraw(previous){
+function syncAutoDealPhase(){
  if(!autoDeal)return;
  const s=snap.state;
- if(s.phase!=='dealing'||dealingComplete()){autoDeal=false;clearTimeout(autoTimer);return;}
- if(!isMyTurn())return;
- const player=mode==='self'?s.current_player:snap.seat;
- const old=previous?.state;
- const hand=s.hands?.[player]||s.hand;
- const before=old?.hands?.[player]||(previous?.seat===player?old?.hand:null);
- const card=TractorDrawPreview.cardFor(s,player,before?new Set(before):null);
- const sameDraw=previous?.room===snap.room&&old?.phase==='dealing'&&old.round===s.round&&old.redeals===s.redeals&&old.deal_count===s.deal_count;
- if(card==null||sameDraw)return;
- if(rank(card)===s.level||rank(card)>=15&&hand.some(c=>c!==card&&face(c)===face(card))){
-  autoDeal=false;clearTimeout(autoTimer);
-  toast(rank(card)===s.level?'摸到级牌，自动摸牌已关闭，可考虑亮主或反主':'凑齐王对，自动摸牌已关闭，可考虑反主');
- }
+ if(s.phase!=='dealing'||dealingComplete()||isTakeover()){autoDeal=false;clearTimeout(autoTimer);}
 }
 async function confirmResult(){
  if(busy||!snap?.settlement?.can_confirm||snap.settlement.confirmed)return;
@@ -368,9 +361,9 @@ async function confirmResult(){
 }
 function scheduleAutoDeal(){
  clearTimeout(autoTimer);
- if(autoDeal&&snap?.state?.phase==='dealing'&&!dealingComplete()&&isMyTurn()&&!selected.size&&!busy){
+ if(autoDeal&&snap?.state?.phase==='dealing'&&!dealingComplete()&&isMyTurn()&&(!selected.size||snap.state.realtime_bidding)&&!busy){
   const scope=sessionScope(),draw=`${snap.room}|${snap.state.round}|${snap.state.redeals}|${snap.state.deal_count}`;
-  autoTimer=setTimeout(()=>{if(currentSession(scope)&&autoDeal&&snap?.state?.phase==='dealing'&&!dealingComplete()&&isMyTurn()&&!selected.size&&!busy&&draw===`${snap.room}|${snap.state.round}|${snap.state.redeals}|${snap.state.deal_count}`)return act({type:'pass'});},650);
+  autoTimer=setTimeout(()=>{if(currentSession(scope)&&autoDeal&&snap?.state?.phase==='dealing'&&!dealingComplete()&&isMyTurn()&&(!selected.size||snap.state.realtime_bidding)&&!busy&&draw===`${snap.room}|${snap.state.round}|${snap.state.redeals}|${snap.state.deal_count}`)return act({type:'pass'});},650);
  }
 }
 async function poll(generation){
@@ -384,6 +377,7 @@ function resetUI(){
  clearTimeout(biddingTimer);biddingEndAt=0;
  handKey='';selectionScopeKey='';forcedSelectionKey='';closedResult=null;previousHands=[new Set(),new Set(),new Set(),new Set()];previousPlay='';
  tentativeSeat=null;seatBusy=false;roomManagerOpen=false;$('roomSeatsButton').hidden=true;$('lobbyError').textContent='';
+ takeoverBusy=false;$('autoplayButton').disabled=false;
  drawTurnKey='';visibleDraw=null;$('drawPreview').hidden=true;$('drawCard').innerHTML='';$('drawCard').dataset.draw='';
  clearTimeout(bidNoticeTimer);$('bidNotice').hidden=true;$('settlementPanel').hidden=$('settlementBottom').hidden=true;$('table').classList.toggle('reviewing',false);$('kittyArea').hidden=false;
  $('setupOverlay').hidden=false;$('lobbyOverlay').hidden=true;$('resultOverlay').hidden=true;$('leaveButton').hidden=true;$('inviteButton').hidden=true;$('inviteOverlay').hidden=true;
@@ -421,7 +415,7 @@ $('closeRoomSeats').onclick=()=>{roomManagerOpen=false;renderLobby();};
 $('passButton').onclick=()=>act({type:'pass'});
 $('randomButton').onclick=()=>act({type:'random'});
 $('autoDealButton').onclick=()=>{autoDeal=!autoDeal;selected.clear();renderHand();validateSelection();updateAutoDeal();scheduleAutoDeal();};
-$('autoplayButton').onclick=async()=>{if(!snap)return;const scope=sessionScope();try{const data=await api('/api/autoplay',{enabled:!snap.autoplay});if(currentSession(scope))acceptSnapshot(data);}catch(e){if(currentSession(scope))toast(e.message);}};
+$('autoplayButton').onclick=async()=>{if(!snap||takeoverBusy)return;const scope=sessionScope();takeoverBusy=true;$('autoplayButton').disabled=true;try{const data=await api('/api/autoplay',{enabled:!(mode==='pvp'?isTakeover():snap.autoplay)});if(currentSession(scope))acceptSnapshot(data);}catch(e){if(currentSession(scope))toast(e.message);}finally{if(currentSession(scope)){takeoverBusy=false;$('autoplayButton').disabled=false;}}};
 async function leaveSession(){
  if(!token)return;if($('leaveButton').disabled)return;
  $('leaveButton').disabled=$('leaveLobbyButton').disabled=true;pollGeneration++;validationTicket++;autoDeal=false;clearTimeout(autoTimer);const scope=sessionScope();

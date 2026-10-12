@@ -431,22 +431,25 @@ test('sole legal follow replaces a conflicting preview, while round changes clea
  assert.equal(b.get('selected.size'),0);
 });
 
-test('new level card cancels auto dealing, including card zero and stale timer callbacks',()=>{
+test('new level card keeps automatic draws at 650ms, including card zero',()=>{
  const b=browser(),data=snapshot();data.state.drawn_card=1;sit(b,data);
  b.run('autoDeal=true;scheduleAutoDeal()');const timer=b.timers.get(b.get('autoTimer')).fn;
  const count=b.requests.length;
  b.context.fixture={...data,version:5,state:{...data.state,hand:[1,0],drawn_card:0,deal_count:5}};
- b.run('acceptSnapshot(fixture)');assert.equal(b.get('autoDeal'),false);
- assert.match(b.element('toast').textContent,/摸到级牌/);assert.equal(b.element('autoDealButton').textContent,'自动摸牌');
+ b.run('acceptSnapshot(fixture)');assert.equal(b.get('autoDeal'),true);
+ assert.equal(b.element('autoDealButton').textContent,'暂停摸牌');
  timer();assert.equal(b.requests.length,count);assert.equal(latest(b,'/api/action'),undefined);
+ const active=b.timers.get(b.get('autoTimer'));assert.equal(active.delay,650);active.fn();
+ assert.equal(JSON.parse(latest(b,'/api/action').options.body).action.type,'pass');
 });
 
-test('new small or big joker pair stops auto dealing even without a legal bid',()=>{
+test('new small or big joker pair never interrupts automatic draws',()=>{
  for(const [first,second] of [[52,106],[53,107]]){
   const b=browser(),data=snapshot();data.state.hand=[1,first];data.state.drawn_card=first;sit(b,data);
   b.run('autoDeal=true');b.context.fixture={...data,version:5,state:{...data.state,hand:[1,first,second],drawn_card:second,deal_count:5}};
-  b.run('acceptSnapshot(fixture)');assert.equal(b.get('autoDeal'),false);
-  assert.match(b.element('toast').textContent,/凑齐王对/);
+  b.run('acceptSnapshot(fixture)');assert.equal(b.get('autoDeal'),true);
+  assert.equal(b.element('autoDealButton').textContent,'暂停摸牌');
+  assert.equal(b.timers.get(b.get('autoTimer')).delay,650);
  }
 });
 
@@ -459,6 +462,58 @@ test('ordinary draws keep auto dealing; repeats, old joker pairs and other playe
  b.run('acceptSnapshot(fixture)');assert.equal(b.get('autoDeal'),true);
  b.context.fixture={...repeat,version:8,state:{...repeat.state,phase:'final_bidding'}};
  b.run('acceptSnapshot(fixture)');assert.equal(b.get('autoDeal'),false);
+});
+
+test('realtime preselection and a submitted bid do not stop automatic draws',async()=>{
+ const b=browser(),data=snapshot();data.state.realtime_bidding=true;data.state.hand=[0,1];sit(b,data);
+ b.run('autoDeal=true;scheduleAutoDeal();toggleCard(0)');assert.equal(b.get('autoDeal'),true);
+ b.timers.get(b.get('autoTimer')).fn();
+ const action=latest(b,'/api/action');assert.equal(JSON.parse(action.options.body).action.type,'pass');
+ action.reply({...data,version:5,state:{...data.state,current_player:3,deal_count:2}});
+ await new Promise(setImmediate);assert.equal(b.get('selected.has(0)'),true);assert.equal(b.get('autoDeal'),true);
+ const bid=b.run('act(selectedAction())');
+ latest(b,'/api/bid').reply({...data,version:6,state:{...data.state,current_player:3,deal_count:2,bid:{player:0,strength:1,cards:[0]}}});
+ await bid;assert.equal(b.get('autoDeal'),true);
+});
+
+test('PVP takeover controls only self, exposes badge, and cancellation restores manual play',async()=>{
+ const b=browser(),data=snapshot();data.takeover=false;data.state.phase='playing';sit(b,data);
+ assert.equal(b.element('autoplayButton').hidden,false);assert.equal(b.element('autoplayButton').textContent,'AI 接管');
+ const takeover=b.element('autoplayButton').onclick();
+ assert.deepEqual(JSON.parse(latest(b,'/api/autoplay').options.body),{enabled:true});
+ const delegated={...data,version:5,takeover:true,ai:{name:'Enoch 桌规版'},players:data.players.map(p=>({...p,takeover:p.seat===0}))};
+ latest(b,'/api/autoplay').reply(delegated);await takeover;
+ assert.equal(b.element('autoplayButton').textContent,'取消 AI 托管');assert.equal(b.element('submitButton').disabled,true);
+ assert.match(b.element('playersLayer').innerHTML,/ai-control-badge">AI 托管/);
+ assert.equal(b.get('canSelectHand()'),false);assert.equal(b.get('activeHand().length'),1);
+ assert.equal(b.get('selected.size'),0);b.run('toggleCard(1)');assert.equal(b.get('selected.size'),0);
+ const cancel=b.element('autoplayButton').onclick();assert.deepEqual(JSON.parse(latest(b,'/api/autoplay').options.body),{enabled:false});
+ latest(b,'/api/autoplay').reply({...data,version:6});await cancel;
+ assert.equal(b.get('canSelectHand()'),true);assert.equal(b.element('autoplayButton').textContent,'AI 接管');
+ assert.doesNotMatch(b.element('playersLayer').innerHTML,/ai-control-badge/);
+});
+
+test('a peer takeover badge is public while own manual controls remain available',()=>{
+ const b=browser(),data=snapshot();data.takeover=false;data.players[2].takeover=true;data.players[2].name='<other>';sit(b,data);
+ assert.equal(b.get('isMyTurn()'),true);assert.equal(b.element('autoplayButton').textContent,'AI 接管');
+ assert.match(b.element('playersLayer').innerHTML,/&lt;other&gt;/);assert.match(b.element('playersLayer').innerHTML,/AI 托管/);
+});
+
+test('turning on takeover cancels automatic draws and ignores a delayed validation',async()=>{
+ const b=browser(),data=snapshot();data.takeover=false;data.state.realtime_bidding=true;sit(b,data);
+ b.run('autoDeal=true;scheduleAutoDeal();toggleCard(1)');const validating=latest(b,'/api/validate');
+ const timer=b.timers.get(b.get('autoTimer')).fn;
+ b.context.fixture={...data,version:5,takeover:true};b.run('acceptSnapshot(fixture)');
+ assert.equal(b.get('autoDeal'),false);assert.equal(b.get('selected.size'),0);
+ validating.reply({valid:true,message:'可以亮主',level:2});await new Promise(setImmediate);
+ assert.equal(b.element('submitButton').disabled,true);const count=b.requests.length;timer();assert.equal(b.requests.length,count);
+});
+
+test('own current trump explains why the post-burial counter poll skips self',()=>{
+ const b=browser(),data=snapshot();data.state.phase='countering';data.state.current_player=3;
+ data.state.bid={player:0,strength:1,cards:[0]};sit(b,data);
+ assert.equal(b.element('passButton').hidden,true);assert.match(b.element('validationTitle').textContent,/不能反自己/);
+ assert.match(b.element('validationDetail').textContent,/重新轮询/);
 });
 
 test('result explains staying at unplayed mandatory two after gaining the table',()=>{

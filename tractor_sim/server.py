@@ -55,8 +55,10 @@ class Room:
         self.started = mode != "pvp"
         self.host = None
         self.autoplay = False
+        self.policy_epochs = [0] * 4
         self.paused = False
         self.policy_error = False
+        self.policy_error_actor = None
         self.version = 0
         self.diagnostic_revision = None
         self.diagnostic_keys = set()
@@ -205,7 +207,7 @@ class Room:
                 if seat is None or seat in occupied:
                     raise IllegalAction("ROOM_FULL", "房间已满，请换房间号")
             token = secrets.token_urlsafe(32)
-            self.clients[token] = {"seat": seat, "name": name[:24], "seen": time.monotonic()}
+            self.clients[token] = {"seat": seat, "name": name[:24], "seen": time.monotonic(), "takeover": False}
             if self.host is None:
                 self.host = token
             self.refresh_pause()
@@ -218,6 +220,45 @@ class Room:
     def is_bot(self, seat):
         return (self.mode == "pvp" and seat in self.ai_seats or
                 self.mode == "pve" and not any(c["seat"] == seat for c in self.clients.values()))
+
+    def is_takeover(self, seat):
+        return any(c["seat"] == seat and c.get("takeover", False) for c in self.clients.values())
+
+    def policy_controls(self, seat):
+        return self.is_bot(seat) or self.is_takeover(seat) or self.mode != "pvp" and self.autoplay
+
+    def invalidate_policy_control(self, seats):
+        for seat in seats:
+            self.policy_epochs[seat] += 1
+        self.grace_policy_seen = {(revision, actor) for revision, actor in self.grace_policy_seen
+                                  if actor not in seats}
+
+    def set_takeover(self, token, enabled):
+        """Delegate only the caller's occupied chair; keep ownership and private cards."""
+        client = self.check(token)
+        if type(enabled) is not bool:
+            raise ValueError("enabled 须为布尔值")
+        if client["seat"] is None:
+            raise IllegalAction("SEAT_REQUIRED", "请先确认自己的座位")
+        if not self.started:
+            raise IllegalAction("LOBBY", "开局后可以随时开启 AI 托管")
+        if client["takeover"] == enabled:
+            return
+        client["takeover"] = enabled
+        self.invalidate_policy_control({client["seat"]})
+        if not enabled and self.policy_error_actor == client["seat"]:
+            self.policy_error = False
+            self.policy_error_actor = None
+        self.next_bot_at = time.monotonic() + 0.15
+        self.refresh_pause(); self.bump()
+
+    def set_autoplay(self, enabled):
+        if type(enabled) is not bool:
+            raise ValueError("enabled 须为布尔值")
+        if self.autoplay != enabled:
+            self.autoplay = enabled
+            self.invalidate_policy_control(set(range(4)))
+            self.bump()
 
     def _pvp_seat(self, seat):
         if self.mode != "pvp":
@@ -236,6 +277,7 @@ class Room:
         if seat in self.occupied_seats():
             raise IllegalAction("SEAT_TAKEN", "这个位置已被确认，请选择其他空席")
         client["seat"] = seat
+        self.invalidate_policy_control({seat})
         self.refresh_pause(); self.bump()
 
     def cancel_seat(self, token):
@@ -245,6 +287,7 @@ class Room:
         if self.started:
             raise IllegalAction("SEATS_LOCKED", "开局后不能取消或更换座位，请使用离开房间")
         if client["seat"] is not None:
+            self.invalidate_policy_control({client["seat"]})
             client["seat"] = None
             self.bump()
 
@@ -273,6 +316,7 @@ class Room:
         else:
             self.ai_seats.difference_update(seats)
         if before != self.ai_seats:
+            self.invalidate_policy_control(before ^ self.ai_seats)
             self.refresh_pause(); self.bump()
             self.next_bot_at = time.monotonic() + 0.4
 
@@ -306,7 +350,8 @@ class Room:
         now = time.monotonic()
         paused = self.policy_error or (self.mode == "pvp" and self.started and
                  (len(self.occupied_seats()) < 4 or any(c["seat"] is not None and
-                      now - c["seen"] >= DISCONNECT_SECONDS for c in self.clients.values())))
+                      not c.get("takeover", False) and now - c["seen"] >= DISCONNECT_SECONDS
+                      for c in self.clients.values())))
         if paused != self.paused:
             self.paused = paused
             self.sync_bidding_window(now)
@@ -323,7 +368,7 @@ class Room:
             players.append({"seat": seat, "name": human["name"] if human else f"{self.ai_name} {seat + 1}" if bot else f"座位 {seat + 1}",
                             "occupied": human is not None or bot or self.mode == "self",
                             "online": time.monotonic() - human["seen"] < DISCONNECT_SECONDS if human else bot or self.mode == "self",
-                            "bot": bot})
+                            "bot": bot, "takeover": bool(human and human.get("takeover", False))})
         observer = self.env.current_player if self.mode == "self" else client["seat"]
         obs = self.env.observe(observer, omniscient=self.mode == "self") if self.started and observer is not None else None
         if obs is not None:
@@ -341,7 +386,9 @@ class Room:
                 "can_start": self.mode == "pvp" and not self.started and token == self.host and
                     client["seat"] is not None and all(p["occupied"] and p["online"] for p in players),
                 "started": self.started, "paused": self.paused, "autoplay": self.autoplay,
-                "ai": {"id": self.ai_id, "name": self.ai_name} if self.mode == "pve" or self.ai_seats else None,
+                "takeover": client.get("takeover", False),
+                "ai": {"id": self.ai_id, "name": self.ai_name} if self.mode == "pve" or self.ai_seats or
+                    any(c.get("takeover", False) for c in self.clients.values()) else None,
                 "bot_thinking": self.pending is not None,
                 "replay_id": self.replay_id, "history_error": self.history_error,
                 "settlement": self.settlement(client),
@@ -369,6 +416,8 @@ class Room:
             if self.env.phase in ("round_end", "match_end") and self.review_confirmed_by is None:
                 raise IllegalAction("REVIEW_PENDING", "请先由本局庄家确认底牌和计分")
             return self.env.current_player
+        if client.get("takeover", False):
+            raise IllegalAction("AI_CONTROLLED", "AI 正在托管你的座位，请先取消 AI 托管再手动行动")
         if self.mode != 'self' and self.env.phase == 'dealing' and action.get('type') == 'bid':
             return client['seat']
         if self.mode != "self" and client["seat"] != self.env.current_player:
@@ -462,11 +511,11 @@ class Registry:
                     room_time = time.monotonic()
                     room.close_bidding_if_due(room_time)
                     if room.pending is not None:
-                        future, revision, actor = room.pending
+                        future, revision, actor, epoch = room.pending
                         if not future.done():
                             continue
                         room.pending = None
-                        eligible = (room.mode != 'pvp' and room.autoplay or room.is_bot(actor)) and any(
+                        eligible = room.policy_controls(actor) and room.policy_epochs[actor] == epoch and any(
                             c['seat'] is not None for c in room.clients.values())
                         if eligible and room.started and not room.paused and room.env.revision == revision:
                             try:
@@ -479,6 +528,7 @@ class Registry:
                             except Exception as exc:
                                 room.autoplay = False
                                 room.policy_error = True
+                                room.policy_error_actor = actor
                                 room.paused = True
                                 room.env._event("server_error", message="自动策略暂停，请检查服务端日志")
                                 print(f"Bot error in {room.code}: {type(exc).__name__}: {exc}", flush=True)
@@ -499,7 +549,7 @@ class Registry:
                     if actor is not None:
                         observation = room.env.observe(actor)
                         future = pool.submit(room.policies[actor].act, observation)
-                        room.pending = (future, room.env.revision, actor)
+                        room.pending = (future, room.env.revision, actor, room.policy_epochs[actor])
                         room.bump()
             self.prune()
 
@@ -509,7 +559,7 @@ class Registry:
         if not human_seats or not room.started or room.paused or room.env.phase in ('round_end','match_end'):
             return None
         def eligible(actor):
-            return room.mode != 'pvp' and room.autoplay or room.is_bot(actor)
+            return room.policy_controls(actor)
         if room.bidding_deadline is not None:
             for offset in range(4):
                 actor = room.env.next_seat(room.env.current_player, offset)
@@ -621,7 +671,9 @@ class Handler(BaseHTTPRequestHandler):
             token = self.token(); room = self.server.registry.lookup(token)
             if path == "/api/leave":
                 with room.condition:
-                    room.check(token)
+                    client = room.check(token)
+                    if client["seat"] is not None:
+                        room.invalidate_policy_control({client["seat"]})
                     del room.clients[token]
                     if token == room.host:
                         room.host = next(iter(room.clients), None)
@@ -700,10 +752,9 @@ class Handler(BaseHTTPRequestHandler):
                     response = room.snapshot(token)
                 elif path == "/api/autoplay":
                     if room.mode == "pvp":
-                        raise IllegalAction("PVP", "PVP 不允许启动随机托管")
-                    if type(data.get("enabled")) is not bool:
-                        raise ValueError("enabled 须为布尔值")
-                    room.autoplay = data["enabled"]; room.bump()
+                        room.set_takeover(token, data.get("enabled"))
+                    else:
+                        room.set_autoplay(data.get("enabled"))
                     response = room.snapshot(token)
                 else:
                     self.json_response({"error": "NOT_FOUND"}, 404); return

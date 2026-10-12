@@ -92,7 +92,7 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 | `POST /api/action` | `{version,action}` | 接受后快照；旧 version 返回 409，不执行 |
 | `POST /api/bid` | `{round,redeals,action:{type:"bid",cards:[...]}}` | 仅摸牌阶段实时亮主／反主；按房间锁串行裁判，不因其他人摸牌而拒绝旧版本；后到的同强／较弱亮法返回 422 BID_TOO_WEAK，提示亮主无效 |
 | `POST /api/confirm-result` | `{version}` | 终局由本局庄家确认底牌和计分；非庄家返回 `BANKER_ONLY`，旧 version 返回 409 |
-| `POST /api/autoplay` | `{enabled:true|false}` | 开关 self 四家随机托管 / PVE 四家 Enoch 托管；PVP 拒绝 |
+| `POST /api/autoplay` | `{enabled:true|false}` | self 四家随机托管 / PVE 四家 Enoch 托管；PVP 只开关请求者本人座位的 Enoch AI 托管 |
 | `POST /api/leave` | `{}` | `{ok:true}`，释放会话和座位 |
 | `GET /api/health` | 无 | `{ok:true,schema_version:1,service:"tractor_sim",bind_host:监听地址,instance_id:进程随机标识,pve_ai:"enoch-table-v1"}` |
 | `GET /api/site` | 无 | `{public_url:HTTPS入口或null,disconnect_seconds:25,room_idle_seconds:7200}` |
@@ -102,7 +102,9 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 
 实时 bid 与普通动作共享房间锁和同一裁判，服务按实际处理顺序接受请求。摸牌期间其他人发牌／亮牌导致版本变更不使 /api/bid 失效，但 round/redeals 必须匹配，防止旧请求跨局或重洗后生效；摸牌已结束返回 BIDDING_CLOSED，不能用此接口越过后续轮询。座位由 token 确定，不接受客户端冒用其他人的 player；教学自对弈继续代当前摸牌者亮牌。网页仅在观察含 realtime_bidding 时使用新接口，已运行的旧服务仍使用原回合接口，直到用户自行重新启动。
 
-房间快照包括：`version`（房间版本）、`room/mode/seat/name/host`、`players`（昵称/座位/occupied/online/bot）、`controlled`、`started/paused/pause_reason/autoplay/config`、`state`（该客户端的环境观察，未开局或未确认座位时为 null）。新增 `members`（已入房者的 name/seat/self/online，不包含其他人的 token）、`ai_seats`（AI 座位列表）、`can_start`（该客户端可否开始）。未选座者 `seat=null,controlled=[]`，不能取得任何手牌或执行游戏动作；`ai` 元数据也覆盖含 AI 的 PVP 房间。pause_reason 为 null、disconnected 或 policy_error。房间 version 与环境 revision 不同：加入、选座、AI 配置、托管开关、离线等也改变房间版本。出牌和结算确认使用 **version**。
+房间快照包括：`version`（房间版本）、`room/mode/seat/name/host`、`players`（昵称/座位/occupied/online/bot/takeover）、`controlled`、`started/paused/pause_reason/autoplay/config`、`state`（该客户端的环境观察，未开局或未确认座位时为 null）。新增 `members`（已入房者的 name/seat/self/online，不包含其他人的 token）、`ai_seats`（AI 座位列表）、`can_start`（该客户端可否开始）、`takeover`（本人是否主动交给 AI 托管）。`players[].takeover` 对全桌公开；`bot` 仍只表示无人席位的 AI，不把托管真人改成机器人账号。未选座者 `seat=null,controlled=[]`，不能取得任何手牌或执行游戏动作；`ai` 元数据也覆盖含 AI 补位或真人 AI 托管的 PVP 房间。pause_reason 为 null、disconnected 或 policy_error。房间 version 与环境 revision 不同：加入、选座、AI 配置、托管开关、离线等也改变房间版本。出牌和结算确认使用 **version**。
+
+PVP 的 `/api/autoplay` 无须提交全桌 version，仅操作当前 token 的已确认座位，不能替其他玩家开关。未选座返回 `SEAT_REQUIRED`，尚未开局返回 `LOBBY`，enabled 必须是 JSON 布尔值。托管不改变手牌可见范围，保留 seat/name/controlled；托管时手动游戏动作返回 `AI_CONTROLLED`，取消后恢复。开启、取消、离开或换控制者均改变该席控制代次，异步 AI 结果同时核对环境 revision 和控制代次，取消后立即重开也不能执行旧结果。开关在同一房间跨局保留，离开后不继承给新玩家；房主仍负责开始下一局。已托管的真人断线不触发暂停，其他真人仍保留原来的 25 秒断线暂停规则。
 
 PVP 房间号 3..24 位 ASCII 字母、数字、下划线或短横线，区分大小写；省略 room 或留空时创建随机 8 位房间号。后进入者采用第一人配置；最多 16 名房间成员、4 个可玩席位。创建 PVP 会话始终返回未选座，session 请求中的 seat 不会占位；南/西/北/东对应 0/1/2/3，0/2 与 1/3 同队。预选仅是前端状态，确定才请求服务器占座，取消后释放。四席就绪也不自动开始，由已入座房主显式开始；房主配置 AI 前也须先确认自己的座位。
 
