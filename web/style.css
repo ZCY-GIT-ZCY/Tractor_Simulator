@@ -132,4 +132,7 @@ button,.full-hand .card { touch-action:manipulation; }
 .hand-region .full-hand .small-empty { display:block; text-align:center; padding-top:75px; }
 .hand-region .full-hand .trump-dot { right:4px; top:5px; }
 .validation small { max-width:420px; }
+.player-text .player-heading { display:flex; align-items:center; gap:4px; overflow:visible; }
+.player-heading .player-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.player-heading .banker-badge { flex-shrink:0; margin-left:0; }
 @media(max-width:760px) { .validation small { max-width:200px; } }

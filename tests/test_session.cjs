@@ -60,6 +60,35 @@ function sit(browser,data=snapshot()) {
 }
 function latest(browser,path){return browser.requests.findLast(r=>r.url===path);}
 
+test('fixed banker is shown by the nickname immediately while dealing, including seat zero',()=>{
+ for(const seat of [0,1,2,3]){
+  const b=browser(),data=snapshot();data.config.auction=false;
+  data.state.auction=false;data.state.banker=seat;data.state.bid=null;
+  data.players[seat].name='昵称很长也要一直看见庄家标志';sit(b,data);
+  assert.equal((b.element('playersLayer').innerHTML.match(/banker-badge/g)||[]).length,1);
+  assert.match(b.element('playersLayer').innerHTML,/昵称很长也要一直看见庄家标志<\/span><b class="banker-badge">庄/);
+  assert.match(b.element(seat%2?'teamB':'teamA').innerHTML,/庄家方/);
+ }
+});
+
+test('unclaimed auction has no banker badge; a bid identifies its actual banker',()=>{
+ const b=browser(),data=snapshot();data.state.auction=true;data.state.banker=0;data.state.bid=null;sit(b,data);
+ assert.doesNotMatch(b.element('playersLayer').innerHTML,/banker-badge/);
+ data.version++;data.state.banker=3;data.state.bid={player:3,cards:[0],strength:1};
+ b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.match(b.element('playersLayer').innerHTML,/Player 3<\/span><b class="banker-badge">庄/);
+});
+
+test('a subsequent fixed hand shows its own banker despite the previous result and initial auction setting',()=>{
+ const b=browser(),data=snapshot();data.state.round=2;data.state.auction=false;data.state.banker=2;
+ data.state.result={round:1,banker:0};sit(b,data);
+ assert.match(b.element('playersLayer').innerHTML,/Player 2<\/span><b class="banker-badge">庄/);
+ assert.doesNotMatch(b.element('playersLayer').innerHTML,/Player 0<\/span><b class="banker-badge">庄/);
+ data.version++;data.state.phase='round_end';data.state.result={...ending().state.result,banker:2};data.state.banker=1;
+ b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.match(b.element('playersLayer').innerHTML,/Player 2<\/span><b class="banker-badge">庄/);
+});
+
 function playingSnapshot(plays=[],winner=null,events=[],version=4,trickNo=0,last=null){
  const data=snapshot();data.version=version;
  data.state={...data.state,phase:'playing',trump:'H',trick:plays,trick_winner:winner,

@@ -18,7 +18,7 @@ from .cards import LABELS
 
 LOG = logging.getLogger(__name__)
 END_PHASES = ("round_end", "match_end")
-FIELDS = ("phase", "current_player", "turn_direction", "level", "levels", "banker", "trump", "bid",
+FIELDS = ("phase", "current_player", "turn_direction", "level", "levels", "banker", "auction", "trump", "bid",
           "hands", "kitty_public", "kitty_owner", "deal_count", "redeals", "trick",
           "trick_no", "last_trick", "score", "captured_score", "penalty_score",
           "bottom_score", "result", "match_winner")

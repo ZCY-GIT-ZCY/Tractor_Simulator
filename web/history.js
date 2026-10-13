@@ -104,7 +104,7 @@ function buildTimeline(){
  for(const button of $('replayTimeline').querySelectorAll('[data-step]'))button.onclick=()=>clock.seek(Number(button.dataset.step));
 }
 function renderTable(f){
- const s=f.state,banker=s.result?.banker??s.banker,actor=f.actor??s.current_player;
+ const s=f.state,banker=['round_end','match_end'].includes(s.phase)?s.result?.banker??s.banker:s.phase==='dealing'&&s.auction&&!s.bid?null:s.banker,actor=f.actor??s.current_player;
  const noticeLabels={throw:'甩牌',ruff:'杀牌',overruff:'盖杀',trump_lead:'调主'};
  const announcement=(f.events||[]).find(e=>e.type==='play'&&e.notices?.length);
  const handSort=cards=>TractorHandOrder.sort(cards,s.level,s.trump);
@@ -114,7 +114,7 @@ function renderTable(f){
    `<div class="side-hand">${cards.map(c=>`<div class="card-chip ${red(c)?'red':''}">${label(rank(c))}<span>${rank(c)>14?'✦':symbols[suits.indexOf(suit(c))]}</span></div>`).join('')}</div>`;
   const notices=announcement?.player===p.seat?announcement.notices.filter(n=>Object.hasOwn(noticeLabels,n)):[];
   const bubble=notices.length?`<div class="play-notices">${notices.map(n=>`<span class="play-notice ${n}">${noticeLabels[n]}</span>`).join('')}</div>`:'';
-  return `<div class="seat ${pos} ${actor===p.seat?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${p.seat===banker?'<b class="banker-badge">庄</b>':''}</strong><small>${cards.length} 张 · ${p.seat%2?'金队':'青队'}</small></div></div>${hand}${bubble}</div>`;
+  return `<div class="seat ${pos} ${actor===p.seat?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong class="player-heading"><span class="player-name">${esc(p.name)}</span>${p.seat===banker?'<b class="banker-badge">庄</b>':''}</strong><small>${cards.length} 张 · ${p.seat%2?'金队':'青队'}</small></div></div>${hand}${bubble}</div>`;
  }).join('');
  const declaration=['dealing','final_bidding','burying','countering'].includes(s.phase);
  const plays=declaration?(s.bid?[s.bid]:[]):s.trick.length?s.trick:s.last_trick?.plays||[];

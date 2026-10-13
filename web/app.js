@@ -68,13 +68,20 @@ function cardHTML(id,classes=''){
  const center=r>=11&&r<=13?`<span>${label(r)}</span>`:symbol;
  return `<div class="card ${suit(id)==='H'||suit(id)==='D'?'red':''} ${r>14?'joker':''} ${r>=11&&r<=13?'royal':''} ${classes}" data-card="${id}" title="${cardName(id)} · ${id>=54?'第二副':'第一副'}" aria-label="${cardName(id)}" role="img"><div class="corner">${corner}</div><div class="card-center">${center}</div><div class="corner bottom">${corner}</div>${isTrump(id)?'<i class="trump-dot"></i>':''}</div>`;
 }
+function displayedBanker(s){
+ if(!s)return null;
+ if(['round_end','match_end'].includes(s.phase))return s.result?.banker??s.banker;
+ const auction=s.auction??(s.round===1&&snap?.config?.auction);
+ if(s.phase==='dealing'&&auction&&!s.bid)return null;
+ return s.banker;
+}
 function renderTeam(id,team){
- const s=snap?.state,l=s?.levels[team]||2,banker=s&&(s.phase==='round_end'||s.phase==='match_end'?s.result?.banker:s.banker);
+ const s=snap?.state,l=s?.levels[team]||2,banker=displayedBanker(s);
  $(id).className='team-block '+(team?'gold':'');
  $(id).innerHTML=`<div class="team-label"><span><i class="team-dot ${team?'gold':''}"></i>${team?'金队':'青队'} ${banker!=null&&banker%2===team?'· 庄家方':''}</span><strong>${label(l)}</strong></div><div class="level-pips">${Array.from({length:13},(_,i)=>`<i title="${label(i+2)}${mandatory.has(i+2)?' · 必打':''}" class="${i+2<l?'done':i+2===l?'current':''} ${mandatory.has(i+2)?'mandatory':''}"></i>`).join('')}</div>`;
 }
 function renderPlayers(){
- const s=snap.state,banker=['round_end','match_end'].includes(s.phase)?s.result?.banker:s.banker;
+ const s=snap.state,banker=displayedBanker(s);
  $('playersLayer').innerHTML=snap.players.map(p=>{
   const pos=position(p.seat),active=s.current_player===p.seat&&!['round_end','match_end'].includes(s.phase);
   const raw=snap.mode==='self'?s.hands[p.seat]:p.seat===snap.seat?s.hand:null;
@@ -87,7 +94,7 @@ function renderPlayers(){
   if(visible)previousHands[p.seat]=new Set(visible);
   const notice=playNotices.get(p.seat);
   const bubble=notice?`<div class="play-notices" role="status" aria-label="${esc(p.name)}：${notice.map(n=>playNoticeLabels[n]).join('、')}">${notice.map(n=>`<span class="play-notice ${n}">${playNoticeLabels[n]}</span>`).join('')}</div>`:'';
-  return `<div class="seat ${pos} ${active?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${banker===p.seat?'<b class="banker-badge">庄</b>':''}</strong>${p.takeover||p.bot?`<span class="ai-control-badge">${p.bot?'AI 补位':'AI 托管'}</span>`:''}<small>${s.hand_counts[p.seat]} 张 · ${p.seat%2?'金队':'青队'}${!p.online?' · 离线':''}</small></div></div>${hand}${bubble}</div>`;
+  return `<div class="seat ${pos} ${active?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong class="player-heading"><span class="player-name">${esc(p.name)}</span>${banker===p.seat?'<b class="banker-badge">庄</b>':''}</strong>${p.takeover||p.bot?`<span class="ai-control-badge">${p.bot?'AI 补位':'AI 托管'}</span>`:''}<small>${s.hand_counts[p.seat]} 张 · ${p.seat%2?'金队':'青队'}${!p.online?' · 离线':''}</small></div></div>${hand}${bubble}</div>`;
  }).join('');
 }
 function renderPlays(){

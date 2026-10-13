@@ -36,6 +36,15 @@ function fixture(id='a'.repeat(32),level=11){
 }
 const flush=()=>new Promise(setImmediate);
 
+test('replay dealing identifies this hand banker rather than the previous result; auction waits for a bid',()=>{
+ const p=page(),data=fixture();p.context.meta=data.meta;p.context.fixture=data.frames[0];
+ data.frames[0].state={...data.frames[0].state,round:2,auction:false,banker:2,result:{banker:0}};
+ p.run('record={meta};renderTable(fixture)');
+ assert.match(p.element('replayPlayers').innerHTML,/玩家2<\/span><b class="banker-badge">庄/);
+ data.frames[0].state={...data.frames[0].state,round:1,auction:true,banker:null,result:null};
+ p.run('renderTable(fixture)');assert.doesNotMatch(p.element('replayPlayers').innerHTML,/banker-badge/);
+});
+
 test('replay displays referee winner and the actor notice on a partial trick',()=>{
  const p=page(),data=fixture(),state={...data.frames[0].state,phase:'playing',trick_no:0,
   trick:[{player:0,cards:[7]},{player:3,cards:[19]}],trick_winner:3};
