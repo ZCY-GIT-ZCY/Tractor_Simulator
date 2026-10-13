@@ -35,7 +35,7 @@ function browser(initialToken = null, saved = null) {
    if(url==='/api/site')return Promise.resolve({ok:true,json:async()=>({})});
    let finish;
    const promise = new Promise(resolve=>finish=resolve);
-   requests.push({url,options,reply(data,status=200){finish({ok:status<400,status,json:async()=>data});}});
+   requests.push({url,options,reply(data,status=200,release=null){finish({ok:status<400,status,json:async()=>data,...(release?{headers:{get:key=>key==='X-Tractor-Release'?release:null}}:{})});}});
    return promise;
   }});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8'),context);
@@ -59,6 +59,15 @@ function sit(browser,data=snapshot()) {
  browser.run('token=fixture.token;acceptSnapshot(fixture);rememberSeat()');
 }
 function latest(browser,path){return browser.requests.findLast(r=>r.url===path);}
+
+test('a changed release prompts refresh without discarding the current seat or session',async()=>{
+ const b=browser(),data=snapshot();sit(b,data);
+ const first=b.run("api('/api/state')");latest(b,'/api/state').reply(data,200,'release_one');await first;
+ const next=b.run("api('/api/state')");latest(b,'/api/state').reply(data,200,'release_two');await next;
+ assert.match(b.element('toast').textContent,/刷新页面/);
+ assert.equal(b.get('token'),data.token);assert.equal(b.get('snap.seat'),data.seat);
+ assert.equal(b.requests.filter(r=>r.url==='/api/session').length,0);
+});
 
 function ending(){
  const data=snapshot();

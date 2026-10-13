@@ -37,7 +37,7 @@ async function api(path,data){
  const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),60000);
  try{
   const response=await fetch(path,{method:data===undefined?'GET':'POST',headers:{...(data===undefined?{}:{'Content-Type':'application/json'}),...(token?{'Authorization':'Bearer '+token}:{})},body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal});
-  const release=response.headers.get('X-Tractor-Release');
+  const release=response.headers?.get?.('X-Tractor-Release');
   if(release&&loadedRelease&&release!==loadedRelease)toast('牌桌服务已更新。刷新页面可使用新版界面，座位和牌局会保留。');
   if(release)loadedRelease=release;
   let result;try{result=await response.json();}catch{throw new Error(response.status===429?'连接繁忙，请稍后重试':response.ok?'服务器返回异常，请重新连接':'网络暂时不可用，请稍后重试');}
