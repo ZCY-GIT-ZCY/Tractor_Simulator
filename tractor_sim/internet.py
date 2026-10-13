@@ -61,6 +61,16 @@ def valid_public_url(value):
     return value.rstrip("/")
 
 
+def validate_local_origin(origin):
+    parsed = urlparse(origin)
+    if (parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', 'localhost', '::1') or
+            parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+        raise ValueError('origin 须为本机 HTTP 入口，例如 http://127.0.0.1:8765')
+    if parsed.port is None or not 1 <= parsed.port <= 65535:
+        raise ValueError('origin 须指定 1..65535 的端口')
+    return origin.rstrip('/')
+
+
 def validate_config(config, port=None):
     if not isinstance(config, dict):
         raise ValueError("公网配置须为 JSON 对象")
@@ -193,9 +203,12 @@ class Tunnel:
             # cloudflared settings may contain credentials for a named tunnel.
             line = re.sub(r"(?i)(token[:= ]+)[^\s\],}]+", r"\1[redacted]", line)
             self.log.write(line); self.log.flush()
-            found = URL_PATTERN.search(line)
-            if found: self.url = found.group()
-            if "Registered tunnel connection" in line: self.connected.set()
+            self.observe_output(line)
+
+    def observe_output(self, line):
+        found = URL_PATTERN.search(line)
+        if found: self.url = found.group()
+        if "Registered tunnel connection" in line: self.connected.set()
 
     def close(self):
         try:

@@ -11,6 +11,57 @@ from tractor_sim.tunnel_service import origin_instance, validate_origin, publish
 
 
 class PersistentTunnel(unittest.TestCase):
+    def test_unreachable_public_entry_is_cleared_and_reverified_without_restarting_origin(self):
+        class Clock:
+            now = 0
+            def is_set(self): return self.now >= 66
+            def wait(self, delay): self.now += delay
+        clock = Clock()
+        checks = []
+        tunnel = SimpleNamespace(url='https://table.lhr.life', connected=SimpleNamespace(is_set=lambda: True),
+                                 process=SimpleNamespace(poll=lambda: None), close=lambda: None)
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = Path(folder)
+            def public_check(*args, **kwargs):
+                checks.append(clock.now)
+                if len(checks) == 4:
+                    self.assertFalse((runtime / 'public-url.txt').exists())
+                return len(checks) not in (2, 3)
+            with patch('tractor_sim.tunnel_service.create_tunnel', return_value=tunnel) as create, \
+                 patch('tractor_sim.tunnel_service.origin_instance', return_value='unchanged'), \
+                 patch('tractor_sim.tunnel_service.check_public', side_effect=public_check), \
+                 patch('tractor_sim.tunnel_service.time.monotonic', side_effect=lambda: clock.now):
+                supervise(Path('ssh'), 'http://127.0.0.1:8765', runtime, clock, provider='localhost-run')
+            create.assert_called_once()
+            self.assertEqual(checks, [0, 30, 60, 61])
+
+    def test_rotated_domain_removes_old_entry_before_new_domain_verification(self):
+        class Clock:
+            now = 0
+            def is_set(self): return self.now >= 11
+            def wait(self, delay): self.now += delay
+        clock = Clock()
+        tunnel = SimpleNamespace(url='https://old.lhr.life', connected=SimpleNamespace(is_set=lambda: True),
+                                 close=lambda: None)
+        def poll():
+            if clock.now >= 5: tunnel.url = 'https://new.lhr.life'
+            return None
+        tunnel.process = SimpleNamespace(poll=poll)
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = Path(folder)
+            def public_check(url, *args, **kwargs):
+                if url.endswith('new.lhr.life'):
+                    self.assertFalse((runtime / 'public-url.txt').exists())
+                return clock.now != 5
+            with patch('tractor_sim.tunnel_service.create_tunnel', return_value=tunnel), \
+                 patch('tractor_sim.tunnel_service.origin_instance', return_value='unchanged'), \
+                 patch('tractor_sim.tunnel_service.check_public', side_effect=public_check), \
+                 patch('tractor_sim.tunnel_service.time.monotonic', side_effect=lambda: clock.now), \
+                 patch('tractor_sim.tunnel_service.publish_entry', wraps=publish_entry) as published:
+                supervise(Path('ssh'), 'http://127.0.0.1:8765', runtime, clock, provider='localhost-run')
+            self.assertEqual([c.args[1] for c in published.call_args_list],
+                             ['https://old.lhr.life', 'https://new.lhr.life'])
+
     def test_origin_validation_and_exact_health_identity(self):
         self.assertEqual(validate_origin('http://127.0.0.1:8765/'), 'http://127.0.0.1:8765')
         for origin in ('https://localhost:8765', 'http://example.com:8765', 'http://localhost',

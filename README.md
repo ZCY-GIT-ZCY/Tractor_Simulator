@@ -66,6 +66,8 @@ PVP 牌桌右下方可随时点 **AI 接管**，由现有 Enoch 桌规版托管�
 
 Linux 可用 `python3 tools/install_services.py` 安装开机常驻的游戏服务和独立隧道，无需公网 IP。部署与管理见 [Linux 常驻说明](docs/linux-service.md)。隧道重连不重启游戏，验证成功后入口保存在 `runtime/public-url.txt`。
 
+Cloudflare 出口不可用时，Linux 可改用 SSH 中继：`python3 tools/install_services.py --provider localhost-run --tunnel-only`。这会保留已有游戏进程，只切换公网入口；免费域名会变化且有限速，详见上述常驻说明。
+
 ## 服务器运行
 
 在 Linux 或 Windows 的源目录运行：

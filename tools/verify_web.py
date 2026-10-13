@@ -2,6 +2,7 @@
 import argparse
 import json
 import secrets
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,6 +20,16 @@ def verify(base):
         except urllib.error.HTTPError as error:
             return error.code, json.load(error)
     clients = []
+    stopped = threading.Event()
+    heartbeats = []
+    def keep_online(client):
+        def heartbeat():
+            while not stopped.wait(3):
+                try: request('/api/state', token=client['token'])
+                except (OSError, ValueError): pass
+        worker = threading.Thread(target=heartbeat, daemon=True)
+        worker.start()
+        heartbeats.append(worker)
     waiter = None
     code = "qa_" + secrets.token_hex(5)
     try:
@@ -28,9 +39,11 @@ def verify(base):
                                  "config": {"initial_level": 8, "auction": False, "banker": 0}})
             assert status == 200 and client["seat"] is None and not client["started"], (status, client)
             clients.append(client)
+            keep_online(client)
             if i == 0:
                 status, waiter = request('/api/session', {'mode':'pvp', 'room':code, 'name':'QA waiting'})
                 assert status == 200 and waiter['seat'] is None and waiter['state'] is None
+                keep_online(waiter)
             status, seated = request("/api/seat/confirm", {"seat": i}, client["token"])
             assert status == 200 and seated["seat"] == i and not seated["started"], (status, seated)
             client["seat"] = i
@@ -71,6 +84,8 @@ def verify(base):
                 "reconnect_same_seat": True, 'active_join_rejected': True,
                 'leave_automatic_ai': True, 'leave_retry_idempotent': True, 'host_transfer': True}
     finally:
+        stopped.set()
+        for worker in heartbeats: worker.join(0.2)
         for c in clients + ([waiter] if waiter and waiter not in clients else []):
             try: request("/api/leave", {}, c["token"])
             except OSError: pass

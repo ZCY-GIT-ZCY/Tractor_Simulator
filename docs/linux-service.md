@@ -22,6 +22,32 @@ python3 tools/install_services.py
 - `tractor.service`：游戏进程。开机启动，异常退出自动恢复。
 - `tractor-tunnel.service`：独立隧道。掉线由 cloudflared 重连，进程退出后按 2～60 秒退避重试；不重启游戏服务。只有 HTTPS 健康检查返回当前游戏实例 ID，才写入可分享入口。
 
+## Cloudflare 不通时使用 localhost.run
+
+支持免费免域名的 localhost.run SSH 中继。它只需要系统已有的 OpenSSH 客户端，Desk 已验证可以通过出站 TCP 22 建立实际 HTTPS 游戏入口，不需要安装新的客户端或注册账号。
+
+已有游戏服务时，只切换中继并保留当前游戏进程和牌局：
+
+```bash
+cd ~/tractor
+python3 tools/install_services.py --provider localhost-run --tunnel-only
+cat runtime/public-url.txt
+```
+
+首次部署可用 `python3 tools/install_services.py --provider localhost-run --host 0.0.0.0`。恢复 Cloudflare 可用相同命令中的 `--provider cloudflare --tunnel-only`。服务名称仍为 `tractor-tunnel.service`，管理命令相同。
+
+SSH 仅转发本机游戏 HTTP 端口到提供商的 HTTPS 入口，不公开 SSH。匿名连接禁用 SSH agent 和已有身份密钥；提供商主机公钥在 `runtime/relay-known-hosts` 首次记录，之后检查是否发生变化。它不会改动用户原有 `~/.ssh/known_hosts` 或其他 SSH 隧道。
+
+中继掉线自动重试。每 30 秒复查公网健康，连续两次失败撤下旧入口；临时域名改变或游戏实例变化时，先撤下旧入口，再验证新入口。SSH 隧道重连不重启游戏，网页邀请链接从 `/api/site` 取得最新入口。
+
+这是临时入口：免费域名会定期改变并有限速，不能保证永久网址和长时间可用性。换域名后浏览器座位凭据不能自动跨域迁移。正式长期开服可选自己的公网中转服务器或有固定域名的中继。见 [localhost.run 免费说明](https://localhost.run/docs/forever-free/) 和 [连接与域名说明](https://localhost.run/docs/faq/)。
+
+单独运行中继（游戏服务须已存在）：
+
+```bash
+python3 -m tractor_sim.tunnel_service --provider localhost-run --origin http://127.0.0.1:8765
+```
+
 ```bash
 systemctl --user status tractor.service tractor-tunnel.service
 cat ~/tractor/runtime/public-url.txt

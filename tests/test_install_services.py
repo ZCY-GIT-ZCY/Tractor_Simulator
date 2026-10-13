@@ -1,10 +1,41 @@
 import unittest
+import tempfile
+from pathlib import Path as LocalPath
 from pathlib import PurePosixPath as Path
+from unittest.mock import patch
+from types import SimpleNamespace
 
-from tools.install_services import units
+from tools.install_services import units, main
 
 
 class ServicePaths(unittest.TestCase):
+    def test_switching_only_relay_never_restarts_or_rewrites_game_service(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = LocalPath(folder) / 'tractor'
+            root.mkdir()
+            config = LocalPath(folder) / 'config'
+            game = config / 'systemd' / 'user' / 'tractor.service'
+            game.parent.mkdir(parents=True)
+            game.write_text('Existing game definition')
+            with patch('tools.install_services.ROOT', root), \
+                 patch('tools.install_services.sys.argv', ['install_services', '--provider', 'localhost-run', '--tunnel-only']), \
+                 patch('tools.install_services.sys.platform', 'linux'), \
+                 patch.dict('os.environ', {'USER':'test', 'XDG_CONFIG_HOME':str(config)}), \
+                 patch('tools.install_services.shutil.which', return_value='/usr/bin/ssh'), \
+                 patch('tools.install_services.subprocess.run', return_value=SimpleNamespace(returncode=0)) as run:
+                main()
+            self.assertEqual(game.read_text(), 'Existing game definition')
+            commands = [c.args[0] for c in run.call_args_list]
+            self.assertNotIn(['systemctl', '--user', 'restart', 'tractor.service'], commands)
+            self.assertIn(['systemctl', '--user', 'restart', 'tractor-tunnel.service'], commands)
+            self.assertIn('--provider localhost-run', (game.parent / 'tractor-tunnel.service').read_text())
+
+    def test_relay_provider_is_explicit_and_cannot_inject_unit_text(self):
+        unit = units(Path('/home/test/tractor'), Path('/usr/bin/python3'), provider='localhost-run')['tractor-tunnel.service']
+        self.assertIn('--provider localhost-run', unit)
+        with self.assertRaises(ValueError):
+            units(Path('/home/test/tractor'), Path('/usr/bin/python3'), provider='cloudflare\nExecStart=bad')
+
     def test_working_directory_is_an_absolute_path_not_a_quoted_command_argument(self):
         definitions = units(Path('/home/test user/tractor'), Path('/usr/bin/python3'))
         for unit in definitions.values():
