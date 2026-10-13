@@ -14,7 +14,7 @@ def quoted(value):
     return '"' + str(value).replace('%', '%%').replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
-def units(root, python, port=8765, host='127.0.0.1', provider='cloudflare'):
+def units(root, python, port=8765, host='127.0.0.1', provider='cloudflare', live=False):
     if provider not in ('cloudflare', 'localhost-run'):
         raise ValueError('未知公网中继')
     # WorkingDirectory is a single path, not an ExecStart word list. Quoting
@@ -26,9 +26,10 @@ def units(root, python, port=8765, host='127.0.0.1', provider='cloudflare'):
               'Environment=PYTHONDONTWRITEBYTECODE=1\nRestart=on-failure\nRestartSec=5\n'
               'TimeoutStopSec=30\nNoNewPrivileges=true\nUMask=0077\n'
               'StandardOutput=journal\nStandardError=journal\n')
+    game_module = 'tractor_sim.live' if live else 'tractor_sim --serve --headless'
     game = ('[Unit]\nDescription=Tractor Simulator game server\nAfter=network.target\n\n'
             '[Service]\nType=simple\n' + common +
-            f'ExecStart={quoted(python)} -u -m tractor_sim --serve --headless --host {host} '
+            f'ExecStart={quoted(python)} -u -m {game_module} --host {host} '
             f'--port {port} --history-dir {quoted(root / "runtime" / "history")}\n\n'
             '[Install]\nWantedBy=default.target\n')
     tunnel = ('[Unit]\nDescription=Tractor outbound internet relay\n'
@@ -46,10 +47,14 @@ def main():
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--provider', choices=('cloudflare', 'localhost-run'), default='cloudflare')
     parser.add_argument('--tunnel-only', action='store_true', help='只切换/重启公网中继，保留当前游戏进程')
+    parser.add_argument('--live', action='store_true', help='首次启用常驻网关，后续用 update_live.py 更新应用')
+    parser.add_argument('--game-only', action='store_true', help='只安装/重启游戏服务，保留当前隧道进程')
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error('port 须为 1..65535')
-    definitions = units(ROOT, Path(sys.executable), args.port, args.host, args.provider)
+    if args.game_only and args.tunnel_only:
+        parser.error('--game-only 与 --tunnel-only 不能同时使用')
+    definitions = units(ROOT, Path(sys.executable), args.port, args.host, args.provider, args.live)
     if args.dry_run:
         for name, body in definitions.items():
             print(name + '\n' + body)
@@ -57,11 +62,11 @@ def main():
     if not sys.platform.startswith('linux'):
         parser.error('此工具用于 Linux systemd 用户服务；Windows 使用 run-public.bat')
     # Finish preparation before replacing/restarting any existing service.
-    if args.provider == 'cloudflare':
+    if args.provider == 'cloudflare' and not args.game_only:
         from tractor_sim.internet import install_cloudflared
         install_cloudflared()
     elif not shutil.which('ssh'):
-        parser.error('localhost-run 需要系统 OpenSSH 客户端 ssh')
+        parser.error('SSH 中继需要系统 OpenSSH 客户端 ssh')
     if args.tunnel_only and subprocess.run(
             ['systemctl', '--user', 'cat', 'tractor.service'], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL).returncode != 0:
@@ -79,6 +84,8 @@ def main():
     directory.mkdir(parents=True, exist_ok=True)
     if args.tunnel_only:
         definitions = {'tractor-tunnel.service': definitions['tractor-tunnel.service']}
+    elif args.game_only:
+        definitions = {'tractor.service': definitions['tractor.service']}
     for name, body in definitions.items():
         path = directory / name
         temporary = path.with_suffix('.tmp')
@@ -88,7 +95,8 @@ def main():
     subprocess.run(['systemctl', '--user', 'enable', *definitions], check=True)
     if not args.tunnel_only:
         subprocess.run(['systemctl', '--user', 'restart', 'tractor.service'], check=True)
-    subprocess.run(['systemctl', '--user', 'restart', 'tractor-tunnel.service'], check=True)
+    if not args.game_only:
+        subprocess.run(['systemctl', '--user', 'restart', 'tractor-tunnel.service'], check=True)
     linger = subprocess.run(['loginctl', '--no-ask-password', 'enable-linger', os.environ['USER']])
     if linger.returncode:
         print('请管理员为本用户启用 loginctl enable-linger，以便退出 SSH 后和开机时常驻。')

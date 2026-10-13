@@ -18,6 +18,7 @@ let tentativeSeat=null,seatBusy=false,roomManagerOpen=false;
 let takeoverBusy=false;
 const seatDirections=['南','西','北','东'];
 let publicURL='', remembered=null;
+let loadedRelease='';
 const invitedRoom=new URLSearchParams(location.search).get('room');
 try{remembered=JSON.parse(localStorage.getItem('tractor_resume')||'null');}catch{}
 if(!remembered||typeof remembered.token!=='string'||typeof remembered.room!=='string')remembered=null;
@@ -31,9 +32,14 @@ function showInvite(){if(!snap||mode!=='pvp')return;$('inviteURL').value=inviteL
 async function copyText(value,message){try{await navigator.clipboard.writeText(value);toast(message);}catch{showInvite();toast('长按链接或全选后复制');}}
 
 async function api(path,data){
- const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),12000);
+ // The stable gateway queues requests during a worker replacement. Never
+ // retry a POST automatically: it may already have been accepted upstream.
+ const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),60000);
  try{
   const response=await fetch(path,{method:data===undefined?'GET':'POST',headers:{...(data===undefined?{}:{'Content-Type':'application/json'}),...(token?{'Authorization':'Bearer '+token}:{})},body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal});
+  const release=response.headers.get('X-Tractor-Release');
+  if(release&&loadedRelease&&release!==loadedRelease)toast('牌桌服务已更新。刷新页面可使用新版界面，座位和牌局会保留。');
+  if(release)loadedRelease=release;
   let result;try{result=await response.json();}catch{throw new Error(response.status===429?'连接繁忙，请稍后重试':response.ok?'服务器返回异常，请重新连接':'网络暂时不可用，请稍后重试');}
   if(!response.ok){const e=new Error(result.message||'请求失败');e.code=result.code||result.error;e.status=response.status;throw e;}
   return result;

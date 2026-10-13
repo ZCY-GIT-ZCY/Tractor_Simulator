@@ -485,6 +485,8 @@ class Registry:
         self.tokens = {}
         self.lock = threading.RLock()
         self.stopped = threading.Event()
+        self.frozen = threading.Event()
+        self.frozen_at = None
         self.max_rooms = max_rooms
         self.idle_seconds = idle_seconds
 
@@ -492,6 +494,8 @@ class Registry:
         """Only expire rooms whose entire membership has stopped polling."""
         now = time.monotonic()
         with self.lock:
+            if self.frozen.is_set():
+                return
             for code, room in list(self.rooms.items()):
                 with room.condition:
                     expired = (now - max(c["seen"] for c in room.clients.values()) > self.idle_seconds
@@ -564,6 +568,45 @@ class Registry:
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="tractor-ai") as pool:
             self._dispatch_bots(pool)
 
+    def freeze(self, timeout=8):
+        """Gateway has drained HTTP; let private policy RNG mutations finish."""
+        from .checkpoint import dump_registry
+        with self.lock:
+            if self.frozen_at is None:
+                self.frozen_at = time.monotonic()
+                self.frozen.set()
+            rooms = list(self.rooms.values())
+        deadline = time.monotonic() + timeout
+        for room in rooms:
+            with room.condition:
+                pending = room.pending
+            if pending:
+                future = pending[0]
+                future.cancel()  # Cancel queued work; running RNG must drain.
+                # Never serialize a running Future or apply its stale result.
+                try:
+                    future.result(timeout=max(0, deadline - time.monotonic()))
+                except TimeoutError:
+                    raise RuntimeError('AI 排空超时，取消更新')
+                except Exception:
+                    pass  # A failed result is retried by the restored worker.
+                with room.condition:
+                    room.pending = None
+        return dump_registry(self)
+
+    def resume(self):
+        from .checkpoint import shift_clocks
+        with self.lock:
+            if self.frozen_at is None:
+                return
+            duration = time.monotonic() - self.frozen_at
+            for room in self.rooms.values():
+                with room.condition:
+                    shift_clocks(room, duration)
+                    room.condition.notify_all()
+            self.frozen_at = None
+            self.frozen.clear()
+
     def _dispatch_bots(self, pool):
         while not self.stopped.wait(0.05):
             with self.lock:
@@ -571,6 +614,8 @@ class Registry:
             now = time.monotonic()
             for room in rooms:
                 with room.condition:
+                    if self.frozen.is_set():
+                        continue
                     room.refresh_pause()
                     room_time = time.monotonic()
                     room.close_bidding_if_due(room_time)
@@ -675,6 +720,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if self.server.registry.frozen.is_set() and parsed.path != '/api/health':
+            self.json_response({'error': 'UPDATING', 'message': '更新中，请稍候'}, 503); return
         try:
             if parsed.path == "/api/history":
                 self.json_response(self.server.registry.history.listing()); return
@@ -722,6 +769,32 @@ class Handler(BaseHTTPRequestHandler):
             self.json_response({"error": "REQUEST", "message": str(exc)}, 400)
 
     def do_POST(self):
+        path = unquote(urlparse(self.path).path)
+        if path.startswith('/api/internal/'):
+            if (not self.server.control_key or self.client_address[0] != '127.0.0.1' or
+                    not secrets.compare_digest(self.headers.get('X-Tractor-Control', ''), self.server.control_key)):
+                self.json_response({'error': 'NOT_FOUND'}, 404); return
+            try:
+                if path == '/api/internal/freeze':
+                    self.json_response(self.server.registry.freeze())
+                elif path == '/api/internal/pause':
+                    registry = self.server.registry
+                    with registry.lock:
+                        if registry.frozen_at is None:
+                            registry.frozen_at = time.monotonic()
+                            registry.frozen.set()
+                        self.json_response({'schema': 1, 'clock': registry.frozen_at, 'rooms': [],
+                            'max_rooms': registry.max_rooms, 'idle_seconds': registry.idle_seconds})
+                elif path == '/api/internal/resume':
+                    self.server.registry.resume()
+                    self.json_response({'ok': True})
+                else:
+                    self.json_response({'error': 'NOT_FOUND'}, 404)
+            except Exception as exc:
+                self.json_response({'error': 'UPDATE_FAILED', 'message': str(exc)}, 500)
+            return
+        if self.server.registry.frozen.is_set():
+            self.json_response({'error': 'UPDATING', 'message': '更新中，请稍候'}, 503); return
         try:
             size = int(self.headers.get("Content-Length", "0"))
             if self.headers.get_content_type() != "application/json":
@@ -836,14 +909,18 @@ class TractorServer(ThreadingHTTPServer):
         super().server_bind()
 
     def __init__(self, address, verbose=False, policy_factory=None, max_rooms=32, public_url=None, history_dir=None,
-                 public_entry_file=None):
+                 public_entry_file=None, control_key=None, checkpoint=None, instance_id=None):
         self.public_url = public_url
         self.public_entry_file = Path(public_entry_file) if public_entry_file else ROOT / 'runtime' / 'public-entry.json'
-        self.instance_id = secrets.token_hex(16)
+        self.instance_id = instance_id or secrets.token_hex(16)
+        self.control_key = control_key
         self.request_slots = threading.BoundedSemaphore(160)
         super().__init__(address, Handler)
         self.verbose = verbose
         self.registry = Registry(policy_factory, max_rooms=max_rooms, history_dir=history_dir)
+        if checkpoint is not None:
+            from .checkpoint import load_registry
+            load_registry(self.registry, checkpoint)
         self.bot_thread = threading.Thread(target=self.registry.run_bots, daemon=True, name="tractor-policies")
         self.bot_thread.start()
 

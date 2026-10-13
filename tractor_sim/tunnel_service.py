@@ -66,6 +66,7 @@ def supervise(binary, origin, runtime, stop, protocol='http2', provider='cloudfl
             if stop.is_set():
                 break
             tunnel = create_tunnel(provider, binary, origin, runtime, protocol)
+            verify = getattr(tunnel, 'verify_public', check_public)
             advertised = None
             last_public_check = 0
             public_failures = 0
@@ -80,7 +81,7 @@ def supervise(binary, origin, runtime, stop, protocol='http2', provider='cloudfl
                     deadline = time.monotonic() + 120
                 if tunnel.url and tunnel.connected.is_set() and instance:
                     identity = (tunnel.url, instance)
-                    if identity != advertised and check_public(tunnel.url, instance, timeout=5):
+                    if identity != advertised and verify(tunnel.url, instance, timeout=5):
                         publish_entry(runtime, *identity)
                         advertised = identity
                         last_public_check = time.monotonic()
@@ -89,14 +90,15 @@ def supervise(binary, origin, runtime, stop, protocol='http2', provider='cloudfl
                         print('公网入口已验证：' + tunnel.url, flush=True)
                 if advertised is not None and time.monotonic() - last_public_check >= 30:
                     last_public_check = time.monotonic()
-                    public_failures = 0 if check_public(tunnel.url, instance, timeout=5) else public_failures + 1
+                    public_failures = 0 if verify(tunnel.url, instance, timeout=5) else public_failures + 1
                     if public_failures >= 2:
                         clear_entry(runtime)
                         advertised = None
                         deadline = time.monotonic() + 120
-                if advertised is None and time.monotonic() >= deadline:
+                if (advertised is None and time.monotonic() >= deadline and
+                        not getattr(tunnel, 'preserve_address', False)):
                     raise RuntimeError('公网入口验证超时')
-                stop.wait(5 if advertised else 1)
+                stop.wait(5 if advertised else getattr(tunnel, 'unverified_poll_seconds', 1))
         except (OSError, ValueError, RuntimeError) as exc:
             print(f'隧道暂不可用：{exc}；{retry} 秒后重试，游戏服务继续运行。', flush=True)
         finally:
@@ -130,7 +132,7 @@ def main():
                 parser.error('--cloudflared 仅用于 cloudflare 中继')
             ssh = shutil.which('ssh')
             if not ssh:
-                parser.error('localhost-run 需要系统 OpenSSH 客户端 ssh')
+                parser.error('SSH 中继需要系统 OpenSSH 客户端 ssh')
             binary = Path(ssh)
         supervise(binary, origin, args.runtime, stop, args.protocol, args.provider)
     finally:

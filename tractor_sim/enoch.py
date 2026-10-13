@@ -574,6 +574,16 @@ class EnochPolicy:
             return {"type": "pass"}
         rankings = [(bid_strength(o["hand"],o["level"],suit(a["cards"][0]) if rank(a["cards"][0]) < 15 else None),a)
                     for a in options]
+        if o.get('auction') and o['level'] == 2 and o['phase'] in ('dealing', 'final_bidding'):
+            # Taking the opening bank is mandatory whenever a legal declaration
+            # exists. Prefer the strongest declaration, then our best trump suit.
+            # Options already exclude self-counters, weak raises and first jokers.
+            def auction_priority(item):
+                value, action = item
+                cards = action['cards']
+                tier = 1 if len(cards) == 1 else (rank(cards[0]) - 12 if rank(cards[0]) >= 15 else 2)
+                return tier, value
+            return copy.deepcopy(max(rankings, key=auction_priority)[1])
         value, action = max(rankings,key=lambda x: (x[0],len(x[1]["cards"])))
         tr = suit(action["cards"][0]) if rank(action["cards"][0]) < 15 else None
         if o["phase"] == "dealing" and len(o["hand"]) < 15:

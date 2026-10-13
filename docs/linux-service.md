@@ -19,6 +19,8 @@ python3 tools/install_services.py
 
 ## 两个独立服务
 
+如需应用前后端更新时保留座位和牌局，首次安装加 `--live`，之后用 `python3 tools/update_live.py`，见 [不停服更新说明](live-updates.md)。已有旧版游戏服务首次切换须等待牌局结束，日常更新不要再运行安装器或重启服务。
+
 - `tractor.service`：游戏进程。开机启动，异常退出自动恢复。
 - `tractor-tunnel.service`：独立隧道。掉线由 cloudflared 重连，进程退出后按 2～60 秒退避重试；不重启游戏服务。只有 HTTPS 健康检查返回当前游戏实例 ID，才写入可分享入口。
 

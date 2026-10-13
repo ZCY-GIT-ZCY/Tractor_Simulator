@@ -9,6 +9,30 @@ from tools.install_services import units, main
 
 
 class ServicePaths(unittest.TestCase):
+    def test_live_game_unit_uses_gateway_and_unchanged_http_port(self):
+        definitions = units(Path('/home/test/tractor'), Path('/usr/bin/python3'), live=True)
+        self.assertIn('-m tractor_sim.live --host 127.0.0.1 --port 8765', definitions['tractor.service'])
+        self.assertIn('--origin http://127.0.0.1:8765', definitions['tractor-tunnel.service'])
+
+    def test_game_only_preserves_tunnel_definition_and_process(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = LocalPath(folder) / 'tractor'
+            root.mkdir()
+            config = LocalPath(folder) / 'config'
+            tunnel = config / 'systemd' / 'user' / 'tractor-tunnel.service'
+            tunnel.parent.mkdir(parents=True)
+            tunnel.write_text('Existing tunnel')
+            with patch('tools.install_services.ROOT', root), \
+                 patch('tools.install_services.sys.argv', ['install_services', '--live', '--game-only']), \
+                 patch('tools.install_services.sys.platform', 'linux'), \
+                 patch.dict('os.environ', {'USER': 'test', 'XDG_CONFIG_HOME': str(config)}), \
+                 patch('tools.install_services.shutil.which', return_value='/usr/bin/ssh'), \
+                 patch('tools.install_services.subprocess.run', return_value=SimpleNamespace(returncode=0)) as run:
+                main()
+            self.assertEqual(tunnel.read_text(), 'Existing tunnel')
+            commands = [c.args[0] for c in run.call_args_list]
+            self.assertNotIn(['systemctl', '--user', 'restart', 'tractor-tunnel.service'], commands)
+            self.assertIn(['systemctl', '--user', 'restart', 'tractor.service'], commands)
     def test_switching_only_relay_never_restarts_or_rewrites_game_service(self):
         with tempfile.TemporaryDirectory() as folder:
             root = LocalPath(folder) / 'tractor'

@@ -7,6 +7,8 @@ dist/
 docs/run.json
 runtime/
 dependencies/
+private-ops/
+ops-private/
 .venv/
 *.log
 *.pid
