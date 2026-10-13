@@ -3,6 +3,7 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -13,7 +14,12 @@ def quoted(value):
 
 
 def units(root, python, port=8765, host='127.0.0.1'):
-    common = (f'WorkingDirectory={quoted(root)}\nEnvironment=PYTHONUTF8=1\n'
+    # WorkingDirectory is a single path, not an ExecStart word list. Quoting
+    # it makes systemd treat the quote as the first character of a relative path.
+    directory = str(root).replace('%', '%%')
+    if '\n' in directory or '\r' in directory:
+        raise ValueError('项目目录不能包含换行符')
+    common = (f'WorkingDirectory={directory}\nEnvironment=PYTHONUTF8=1\n'
               'Environment=PYTHONDONTWRITEBYTECODE=1\nRestart=on-failure\nRestartSec=5\n'
               'TimeoutStopSec=30\nNoNewPrivileges=true\nUMask=0077\n'
               'StandardOutput=journal\nStandardError=journal\n')
@@ -48,6 +54,15 @@ def main():
     # Finish preparation before replacing/restarting any existing service.
     from tractor_sim.internet import install_cloudflared
     install_cloudflared()
+    runtime = ROOT / 'runtime'
+    runtime.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='unit-check-', dir=runtime) as folder:
+        candidates = []
+        for name, body in definitions.items():
+            candidate = Path(folder) / name
+            candidate.write_text(body, encoding='utf-8')
+            candidates.append(str(candidate))
+        subprocess.run(['systemd-analyze', '--user', 'verify', *candidates], check=True)
     directory = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'systemd' / 'user'
     directory.mkdir(parents=True, exist_ok=True)
     for name, body in definitions.items():
