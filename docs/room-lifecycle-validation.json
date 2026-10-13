@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-13",
+  "local_python_tests_passed": 188,
+  "local_frontend_tests_passed": 83,
+  "isolated_zip_deployment_passed": true,
+  "http_smoke_passed": true,
+  "tested_cases": [
+    "active departure automatically replaces human with AI",
+    "repeated leave is idempotent and former token expires",
+    "seated human has priority during host transfer",
+    "departed banker receives AI result acknowledgment",
+    "two simultaneous AI claims have exactly one winner",
+    "seat confirmation rejects a race with round start",
+    "delegated human seat cannot be claimed by newcomers",
+    "AI replacement preserves levels, environment and review state",
+    "active and full rooms reject new sessions",
+    "last human leaves: bots finish one hand, wait, then allow replacement",
+    "failed tunnel retries without starting or stopping game server",
+    "published entry must match current game instance"
+  ],
+  "browser": {
+    "desktop": "actual local browser via invitation",
+    "mobile_viewport": "390x844",
+    "ai_preview_and_confirmation": true,
+    "leave_returns_to_homepage_and_bot_replaces_seat": true,
+    "next_hand_rejects_new_invitation_with_clear_reason": true
+  },
+  "private_game_records_or_credentials_included": false
+}

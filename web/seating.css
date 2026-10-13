@@ -9,6 +9,7 @@
 .seat-pick>strong{font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.seat-pick>small{font-size:9px;color:#8c9680}
 .seat-choice.chosen{border-color:#ad955d;box-shadow:0 0 0 2px #dac48d28;background:#f7f2e4}.seat-choice.mine{border-color:#4d7959;background:#e6eede;box-shadow:0 0 0 2px #506c4120}
 .seat-choice.occupied:not(.mine){background:#e9ece5}.seat-choice.ai-seat{border-style:dashed;background:#efefe3}
+.seat-choice.ai-seat.chosen{background:#f7f2e4}.seat-choice.ai-seat .seat-pick:not(:disabled)>small{color:#527b5d}
 .seat-ai-toggle{border:0;border-top:1px solid #dce2d2;background:#e8edde;color:#6b795f;font-size:10px;min-height:29px;width:100%;cursor:pointer}.seat-ai-toggle:disabled{opacity:.55;cursor:default}
 .seat-compass{grid-area:2/2;align-self:center;justify-self:center;display:flex;flex-direction:column;justify-content:center;width:90px;height:90px;border:1px solid #e1dec8;border-radius:50%;color:#4f6b52;background:#f5f4e9;font-size:13px;gap:6px}.seat-compass small{font-size:9px;color:#949a85;letter-spacing:1px}
 .seating-dialog .seat-hint{color:#617950;line-height:1.6;min-height:19px}.seat-confirm-actions{display:flex;justify-content:center;gap:10px;margin:12px 0}.seat-confirm-actions .primary{font-size:12px}

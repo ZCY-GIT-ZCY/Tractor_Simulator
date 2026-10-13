@@ -133,7 +133,7 @@ class SeatingAPI(unittest.TestCase):
         status, error = self.request('/api/action', {'version': waiting['version'], 'action': {'type': 'pass'}}, waiter['token'])
         self.assertEqual(error['code'], 'SEAT_REQUIRED')
         status, error = self.request('/api/seat/confirm', {'seat': 0}, waiter['token'])
-        self.assertEqual(error['code'], 'SEAT_TAKEN')
+        self.assertEqual(error['code'], 'IN_PROGRESS')
         status, error = self.request('/api/room/ai', {'seat': 0, 'enabled': False}, host['token'])
         self.assertEqual(error['code'], 'SEATS_LOCKED')
 
@@ -143,7 +143,7 @@ class SeatingAPI(unittest.TestCase):
         self.request('/api/room/start', {}, clients[0]['token'])
         self.request('/api/leave', {}, clients[2]['token'])
         _, state = self.request('/api/state', token=clients[0]['token'])
-        self.assertTrue(state['paused'])
+        self.assertFalse(state['paused'])
         status, state = self.request('/api/room/ai', {'seat': 2, 'enabled': True}, clients[0]['token'])
         self.assertEqual(status, 200); self.assertFalse(state['paused'])
         self.assertTrue(state['players'][2]['bot'])
@@ -201,6 +201,98 @@ class SeatingAPI(unittest.TestCase):
             self.assertTrue(all(isinstance(p, EnochPolicy) for p in room.policies))
             self.assertEqual(len({id(p) for p in room.policies}), 4)
             self.assertEqual(room.snapshot(host)['ai']['id'], 'enoch-table-v1')
+
+    def finish_hand(self, room):
+        policy = RandomPolicy(19)
+        with room.condition:
+            for _ in range(1200):
+                if room.env.phase in ('round_end', 'match_end'): return
+                if room.bidding_deadline is not None:
+                    room.close_bidding_if_due(room.bidding_deadline)
+                else:
+                    room.step(policy.act(room.env.observe(room.env.current_player)))
+            self.fail('hand did not finish')
+
+    def test_between_round_replacement_is_atomic_and_preserves_level_and_review(self):
+        host, a, b = self.enter(banker=0), self.enter('A'), self.enter('B')
+        self.confirm(host, 3)
+        self.request('/api/room/ai', {'enabled': True}, host['token'])
+        self.request('/api/room/start', {}, host['token'])
+        room = self.server.registry.lookup(host['token'])
+        self.finish_hand(room)
+        new = self.enter('New')
+        self.assertTrue(new['between_rounds']); self.assertTrue(new['seat_selection_open'])
+        self.assertIsNone(new['state'])
+        with room.condition:
+            before = room.env.export_state()
+            epoch = room.policy_epochs[0]
+        barrier = threading.Barrier(2)
+        def claim(client):
+            barrier.wait()
+            return self.request('/api/seat/confirm', {'seat': 0}, client['token'])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            replies = list(pool.map(claim, (a, b)))
+        self.assertEqual(sorted(status for status, _ in replies), [200, 422])
+        self.assertEqual(next(data['code'] for status, data in replies if status == 422), 'SEAT_TAKEN')
+        self.assertEqual(self.confirm(new, 2)['players'][2]['name'], 'New')
+        with room.condition:
+            self.assertEqual(before, room.env.export_state())
+            self.assertEqual(room.policy_epochs[0], epoch + 1)
+            self.assertNotIn(0, room.ai_seats)
+            self.assertIsNone(room.review_confirmed_by)
+            # The new player can review a former AI banker's public bottom.
+            winner = next(c for c in (a, b) if room.clients[c['token']]['seat'] == 0)
+            room.confirm_result(winner['token'])
+        _, state = self.request('/api/state', token=host['token'])
+        status, next_hand = self.request('/api/action', {'version': state['version'],
+            'action': {'type': 'next_round'}}, host['token'])
+        self.assertEqual(status, 200)
+        self.assertEqual(next_hand['state']['round'], 2)
+        self.assertFalse(next_hand['seat_selection_open'])
+        self.assertEqual(next_hand['players'][2]['name'], 'New')
+
+    def test_full_lobby_and_completed_match_reject_admission(self):
+        clients = [self.enter(str(i)) for i in range(4)]
+        for seat, client in enumerate(clients): self.confirm(client, seat)
+        code = clients[0]['room']
+        status, error = self.request('/api/session', {'mode': 'pvp', 'room': code})
+        self.assertEqual((status, error['code']), (422, 'ROOM_FULL'))
+        room = self.server.registry.lookup(clients[0]['token'])
+        with room.condition:
+            room.leave(clients[3]['token'])
+            room.started = True; room.env.phase = 'match_end'
+        status, error = self.request('/api/session', {'mode': 'pvp', 'room': code})
+        self.assertEqual((status, error['code']), (422, 'MATCH_FINISHED'))
+
+    def test_waiting_confirmation_cannot_cross_start_and_cannot_replace_takeover_human(self):
+        host, waiter = self.enter(), self.enter('Waiter')
+        self.confirm(host, 3)
+        self.request('/api/room/ai', {'enabled': True}, host['token'])
+        self.confirm(waiter, 1)  # AI seats can also be claimed before starting.
+        pending = self.enter('Pending')
+        self.request('/api/room/start', {}, host['token'])
+        status, error = self.request('/api/seat/confirm', {'seat': 0}, pending['token'])
+        self.assertEqual((status, error['code']), (422, 'IN_PROGRESS'))
+        self.finish_hand(self.server.registry.lookup(host['token']))
+        self.request('/api/autoplay', {'enabled': True}, waiter['token'])
+        status, error = self.request('/api/seat/confirm', {'seat': 1}, pending['token'])
+        self.assertEqual((status, error['code']), (422, 'SEAT_TAKEN'))
+
+    def test_host_departure_prefers_seated_human_and_banker_departure_confirms_via_ai(self):
+        host, waiter, peer = self.enter(), self.enter('Waiter'), self.enter('Peer')
+        self.confirm(host, 3); self.confirm(peer, 1)
+        self.request('/api/room/ai', {'enabled': True}, host['token'])
+        self.request('/api/room/start', {}, host['token'])
+        room = self.server.registry.lookup(host['token'])
+        self.finish_hand(room)
+        self.request('/api/leave', {}, host['token'])
+        _, state = self.request('/api/state', token=peer['token'])
+        self.assertTrue(state['host']); self.assertTrue(state['players'][3]['bot'])
+        self.assertTrue(state['settlement']['ai_banker'])
+        with room.condition: room.review_started -= AI_REVIEW_SECONDS
+        deadline = time.monotonic() + 2
+        while room.review_confirmed_by is None and time.monotonic() < deadline: time.sleep(.02)
+        self.assertEqual(room.review_confirmed_by, 3)
 
 
 if __name__ == '__main__': unittest.main()

@@ -19,6 +19,7 @@ def verify(base):
         except urllib.error.HTTPError as error:
             return error.code, json.load(error)
     clients = []
+    waiter = None
     code = "qa_" + secrets.token_hex(5)
     try:
         assert request("/api/health")[1]["service"] == "tractor_sim"
@@ -27,6 +28,9 @@ def verify(base):
                                  "config": {"initial_level": 8, "auction": False, "banker": 0}})
             assert status == 200 and client["seat"] is None and not client["started"], (status, client)
             clients.append(client)
+            if i == 0:
+                status, waiter = request('/api/session', {'mode':'pvp', 'room':code, 'name':'QA waiting'})
+                assert status == 200 and waiter['seat'] is None and waiter['state'] is None
             status, seated = request("/api/seat/confirm", {"seat": i}, client["token"])
             assert status == 200 and seated["seat"] == i and not seated["started"], (status, seated)
             client["seat"] = i
@@ -34,11 +38,11 @@ def verify(base):
         assert status == 422 and occupied["code"] == "SEAT_CONFIRMED"
         status, begun = request("/api/room/start", {}, clients[0]["token"])
         assert status == 200 and begun["started"]
-        status, waiter = request("/api/session", {"mode": "pvp", "room": code, "name": "QA waiting"})
-        assert status == 200 and waiter["seat"] is None and waiter["state"] is None
         clients.append(waiter)
+        status, denied = request('/api/session', {'mode':'pvp', 'room':code, 'name':'QA late'})
+        assert status == 422 and denied['code'] == 'IN_PROGRESS'
         status, denied = request("/api/seat/confirm", {"seat": 0}, waiter["token"])
-        assert status == 422 and denied["code"] == "SEAT_TAKEN"
+        assert status == 422 and denied["code"] == "IN_PROGRESS"
         versions = []
         for c in clients[:4]:
             status, current = request("/api/state", token=c["token"])
@@ -57,12 +61,17 @@ def verify(base):
             assert current["version"] == advanced["version"]
             assert current["state"]["deal_count"] == 2
             assert current["seat"] == c["seat"]
+        assert request('/api/leave', {}, clients[0]['token'])[0] == 200
+        assert request('/api/leave', {}, clients[0]['token'])[0] == 200
+        _, peer = request('/api/state', token=clients[1]['token'])
+        assert peer['host'] and peer['players'][0]['bot'] and not peer['paused']
         return {"url": base, "four_confirmed_seats": True, "host_start": True,
                 "private_hands": True, "unseated_private": True, "occupied_seat_rejected": True,
                 "turn_ownership": True, "stale_rejected": True, "synchronized_after_action": True,
-                "reconnect_same_seat": True}
+                "reconnect_same_seat": True, 'active_join_rejected': True,
+                'leave_automatic_ai': True, 'leave_retry_idempotent': True, 'host_transfer': True}
     finally:
-        for c in clients:
+        for c in clients + ([waiter] if waiter and waiter not in clients else []):
             try: request("/api/leave", {}, c["token"])
             except OSError: pass
 

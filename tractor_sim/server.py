@@ -52,6 +52,7 @@ class Room:
         self.pending = None
         self.clients = {}
         self.ai_seats = set()
+        self.departed_names = {}
         self.started = mode != "pvp"
         self.host = None
         self.autoplay = False
@@ -132,8 +133,7 @@ class Room:
                     for seat in range(4):
                         human = next((c for c in self.clients.values() if c["seat"] == seat), None)
                         bot = self.is_bot(seat)
-                        players.append({"seat": seat, "name": human["name"] if human else
-                                        f"{self.ai_name} {seat + 1}" if bot else f"座位 {seat + 1}", "bot": bot})
+                        players.append({"seat": seat, "name": self.player_name(seat, human, bot), "bot": bot})
                     try:
                         self.replay_id = self.history.save(self.recording, mode=self.mode,
                             room=self.code, players=players, config=asdict(self.config))
@@ -197,6 +197,7 @@ class Room:
     def join(self, name, seat=None):
         with self.condition:
             if self.mode == "pvp":
+                self.require_admission()
                 if len(self.clients) >= ROOM_MEMBER_LIMIT:
                     raise IllegalAction("ROOM_FULL", "等候区已满，请换房间号")
                 seat = None  # Room membership does not claim a chair.
@@ -214,8 +215,51 @@ class Room:
             self.bump()
             return token
 
+    def seat_selection_open(self):
+        return not self.started or self.env.phase == "round_end"
+
+    def require_admission(self):
+        if self.env.phase == "match_end":
+            raise IllegalAction("MATCH_FINISHED", "比赛已结束，请创建新房间")
+        if not self.seat_selection_open():
+            raise IllegalAction("IN_PROGRESS", "本局正在进行，请在两局之间加入并替换 AI")
+        if len({c["seat"] for c in self.clients.values() if c["seat"] is not None}) == 4:
+            raise IllegalAction("ROOM_FULL", "四席均为真人，房间已满")
+
+    def elect_host(self):
+        """An occupied human chair takes precedence over a waiting member."""
+        self.host = next((t for t, c in self.clients.items() if c["seat"] is not None),
+                         next(iter(self.clients), None))
+
+    def leave(self, token):
+        """Explicit departure releases ownership; an active hand keeps its AI chair."""
+        client = self.check(token)
+        seat = client["seat"]
+        del self.clients[token]
+        if seat is not None:
+            self.invalidate_policy_control({seat})
+            if self.mode == "pvp":
+                self.ai_seats.add(seat)
+                self.departed_names[seat] = client['name']
+            if self.policy_error_actor == seat:
+                self.policy_error = False
+                self.policy_error_actor = None
+        if token == self.host:
+            self.elect_host()
+        self.next_bot_at = time.monotonic() + 0.15
+        self.refresh_pause()
+        self.bump()
+
     def occupied_seats(self):
         return {c["seat"] for c in self.clients.values() if c["seat"] is not None} | self.ai_seats
+
+    def player_name(self, seat, human, bot):
+        if human:
+            return human['name']
+        if bot:
+            return (self.departed_names[seat] + '（AI 接替）' if seat in self.departed_names else
+                    f'{self.ai_name} {seat + 1}')
+        return f'座位 {seat + 1}'
 
     def is_bot(self, seat):
         return (self.mode == "pvp" and seat in self.ai_seats or
@@ -274,10 +318,16 @@ class Room:
             return
         if client["seat"] is not None:
             raise IllegalAction("SEAT_CONFIRMED", "请先取消原选座，再选择新位置")
-        if seat in self.occupied_seats():
+        if not self.seat_selection_open():
+            raise IllegalAction("IN_PROGRESS", "本局已开始，请在两局之间替换 AI")
+        if any(c["seat"] == seat for c in self.clients.values()):
             raise IllegalAction("SEAT_TAKEN", "这个位置已被确认，请选择其他空席")
+        self.ai_seats.discard(seat)
+        self.departed_names.pop(seat, None)
         client["seat"] = seat
         self.invalidate_policy_control({seat})
+        if self.started and (self.host is None or self.clients[self.host]["seat"] is None):
+            self.elect_host()
         self.refresh_pause(); self.bump()
 
     def cancel_seat(self, token):
@@ -365,7 +415,7 @@ class Room:
         for seat in range(4):
             human = next((c for c in self.clients.values() if c["seat"] == seat), None)
             bot = self.is_bot(seat)
-            players.append({"seat": seat, "name": human["name"] if human else f"{self.ai_name} {seat + 1}" if bot else f"座位 {seat + 1}",
+            players.append({"seat": seat, "name": self.player_name(seat, human, bot),
                             "occupied": human is not None or bot or self.mode == "self",
                             "online": time.monotonic() - human["seen"] < DISCONNECT_SECONDS if human else bot or self.mode == "self",
                             "bot": bot, "takeover": bool(human and human.get("takeover", False))})
@@ -386,6 +436,8 @@ class Room:
                 "can_start": self.mode == "pvp" and not self.started and token == self.host and
                     client["seat"] is not None and all(p["occupied"] and p["online"] for p in players),
                 "started": self.started, "paused": self.paused, "autoplay": self.autoplay,
+                "seat_selection_open": self.mode == "pvp" and self.seat_selection_open(),
+                "between_rounds": self.started and self.env.phase == "round_end",
                 "takeover": client.get("takeover", False),
                 "ai": {"id": self.ai_id, "name": self.ai_name} if self.mode == "pve" or self.ai_seats or
                     any(c.get("takeover", False) for c in self.clients.values()) else None,
@@ -443,7 +495,8 @@ class Registry:
             for code, room in list(self.rooms.items()):
                 with room.condition:
                     expired = (now - max(c["seen"] for c in room.clients.values()) > self.idle_seconds
-                               if room.clients else now - room.updated > 60)
+                               if room.clients else now - room.updated >
+                               (self.idle_seconds if room.mode == 'pvp' else 60))
                     if expired:
                         for token in room.clients:
                             self.tokens.pop(token, None)
@@ -494,6 +547,17 @@ class Registry:
             raise IllegalAction("SESSION", "请先进入对局")
         return room
 
+    def leave(self, token):
+        # Registry -> room is also the ordering used by admission and pruning.
+        # Retried leave requests are harmless after the first response is lost.
+        with self.lock:
+            room = self.tokens.get(token)
+            if room is not None:
+                with room.condition:
+                    if token in room.clients:
+                        room.leave(token)
+                    self.tokens.pop(token, None)
+
     def run_bots(self):
         # Policy computations never hold a room lock. Keep at most one task per
         # room and validate its revision before applying an asynchronous result.
@@ -515,8 +579,9 @@ class Registry:
                         if not future.done():
                             continue
                         room.pending = None
-                        eligible = room.policy_controls(actor) and room.policy_epochs[actor] == epoch and any(
-                            c['seat'] is not None for c in room.clients.values())
+                        eligible = room.policy_controls(actor) and room.policy_epochs[actor] == epoch and (
+                            any(c['seat'] is not None for c in room.clients.values()) or
+                            room.mode == 'pvp' and len(room.ai_seats) == 4)
                         if eligible and room.started and not room.paused and room.env.revision == revision:
                             try:
                                 action = future.result()
@@ -533,10 +598,10 @@ class Registry:
                                 room.env._event("server_error", message="自动策略暂停，请检查服务端日志")
                                 print(f"Bot error in {room.code}: {type(exc).__name__}: {exc}", flush=True)
                         room.bump()
-                    if not room.clients:
+                    if not room.clients and (room.mode != 'pvp' or len(room.ai_seats) != 4):
                         continue
                     if room.started and room.env.phase in ("round_end", "match_end"):
-                        review = room.settlement(next(iter(room.clients.values())))
+                        review = room.settlement(next(iter(room.clients.values()), {'seat': None}))
                         if review and review["ai_banker"] and not review["confirmed"] and review["ai_confirm_seconds"] <= 0:
                             room.review_confirmed_by = review["banker"]
                             room.bump()
@@ -556,7 +621,8 @@ class Registry:
     @staticmethod
     def _policy_actor(room):
         human_seats = {c["seat"] for c in room.clients.values() if c["seat"] is not None}
-        if not human_seats or not room.started or room.paused or room.env.phase in ('round_end','match_end'):
+        if (not human_seats and not (room.mode == 'pvp' and len(room.ai_seats) == 4) or
+                not room.started or room.paused or room.env.phase in ('round_end','match_end')):
             return None
         def eligible(actor):
             return room.policy_controls(actor)
@@ -631,7 +697,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_response(snapshot)
                 return
             if parsed.path == "/api/site":
-                self.json_response({"public_url": self.server.public_url,
+                self.json_response({"public_url": self.server.site_public_url(),
                                     "disconnect_seconds": DISCONNECT_SECONDS,
                                     "room_idle_seconds": self.server.registry.idle_seconds}); return
             if parsed.path == "/api/health":
@@ -668,20 +734,11 @@ class Handler(BaseHTTPRequestHandler):
             path = urlparse(self.path).path
             if path == "/api/session":
                 self.json_response(self.server.registry.enter(data)); return
-            token = self.token(); room = self.server.registry.lookup(token)
+            token = self.token()
             if path == "/api/leave":
-                with room.condition:
-                    client = room.check(token)
-                    if client["seat"] is not None:
-                        room.invalidate_policy_control({client["seat"]})
-                    del room.clients[token]
-                    if token == room.host:
-                        room.host = next(iter(room.clients), None)
-                    room.refresh_pause()
-                    room.bump()
-                with self.server.registry.lock:
-                    self.server.registry.tokens.pop(token, None)
+                self.server.registry.leave(token)
                 self.json_response({"ok": True}); return
+            room = self.server.registry.lookup(token)
             with room.condition:
                 room.check(token)
                 room.refresh_pause()
@@ -778,8 +835,10 @@ class TractorServer(ThreadingHTTPServer):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
 
-    def __init__(self, address, verbose=False, policy_factory=None, max_rooms=32, public_url=None, history_dir=None):
+    def __init__(self, address, verbose=False, policy_factory=None, max_rooms=32, public_url=None, history_dir=None,
+                 public_entry_file=None):
         self.public_url = public_url
+        self.public_entry_file = Path(public_entry_file) if public_entry_file else ROOT / 'runtime' / 'public-entry.json'
         self.instance_id = secrets.token_hex(16)
         self.request_slots = threading.BoundedSemaphore(160)
         super().__init__(address, Handler)
@@ -787,6 +846,21 @@ class TractorServer(ThreadingHTTPServer):
         self.registry = Registry(policy_factory, max_rooms=max_rooms, history_dir=history_dir)
         self.bot_thread = threading.Thread(target=self.registry.run_bots, daemon=True, name="tractor-policies")
         self.bot_thread.start()
+
+    def site_public_url(self):
+        if self.public_url:
+            return self.public_url
+        try:
+            # A tunnel process can restart independently of the game process.
+            # Never reuse an entry validated against an earlier game instance.
+            with self.public_entry_file.open(encoding='utf-8') as handle:
+                entry = json.loads(handle.read(4096))
+            if not isinstance(entry, dict) or entry.get('instance_id') != self.instance_id:
+                return None
+            from .internet import valid_public_url
+            return valid_public_url(entry.get('public_url', ''))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return None
 
     def process_request(self, request, client_address):
         if not self.request_slots.acquire(blocking=False):

@@ -62,6 +62,10 @@ PVP 牌桌右下方可随时点 **AI 接管**，由现有 Enoch 桌规版托管�
 
 临时入口每次重建会变化；固定域名模式也已接入 `internet.json`。详细启动、重连、域名配置和故障处理见 [公网使用说明](docs/internet.md)。发布包位于 `dist/TractorWeb.zip`，包含前后端和准确规则副本；用 `python tools/package_web.py` 重建。
 
+好友房间主动离开后 AI 自动接替；新玩家在开局前或两局之间选择 AI 席位并确认接手。对局中或四席均为真人时拒绝新加入，托管真人的席位仍归原玩家。最后一名真人离开后 AI 打完本局即停。
+
+Linux 可用 `python3 tools/install_services.py` 安装开机常驻的游戏服务和独立隧道，无需公网 IP。部署与管理见 [Linux 常驻说明](docs/linux-service.md)。隧道重连不重启游戏，验证成功后入口保存在 `runtime/public-url.txt`。
+
 ## 服务器运行
 
 在 Linux 或 Windows 的源目录运行：

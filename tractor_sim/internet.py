@@ -22,6 +22,7 @@ from .server import ROOT, TractorServer
 
 VERSION = "2026.9.3"
 WINDOWS_SHA256 = "f096265ec2fcbe9bb6e2d64268db167ced3fcbb83d894bdb9e2fcdb26f2ea7e2"
+LINUX_SHA256 = "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2"
 DOWNLOAD_URL = f"https://github.com/cloudflare/cloudflared/releases/download/{VERSION}/cloudflared-windows-amd64.exe"
 DEPENDENCIES = ROOT.parent / "dependencies" / "cloudflared"
 RUNTIME = ROOT / "runtime"
@@ -79,26 +80,32 @@ def validate_config(config, port=None):
 
 
 def install_cloudflared():
-    if platform.system() != "Windows" or platform.machine().lower() not in ("amd64", "x86_64"):
-        raise ValueError("自动下载支持 Windows x64；其他系统请下载 cloudflared 并用 --cloudflared 指定路径")
+    system = platform.system()
+    if system not in ("Windows", "Linux") or platform.machine().lower() not in ("amd64", "x86_64"):
+        raise ValueError("自动下载支持 Windows/Linux x64；其他系统请用 --cloudflared 指定路径")
+    name = "cloudflared.exe" if system == "Windows" else "cloudflared"
+    expected = WINDOWS_SHA256 if system == "Windows" else LINUX_SHA256
+    url = DOWNLOAD_URL if system == "Windows" else f"https://github.com/cloudflare/cloudflared/releases/download/{VERSION}/cloudflared-linux-amd64"
     DEPENDENCIES.mkdir(parents=True, exist_ok=True)
-    binary = DEPENDENCIES / "cloudflared.exe"
-    if binary.is_file() and hashlib.sha256(binary.read_bytes()).hexdigest() == WINDOWS_SHA256:
+    binary = DEPENDENCIES / name
+    if binary.is_file() and hashlib.sha256(binary.read_bytes()).hexdigest() == expected:
+        if system == "Linux": binary.chmod(0o700)
         return binary
-    temporary = DEPENDENCIES / "cloudflared.exe.part"
+    temporary = DEPENDENCIES / (name + ".part")
     print(f"下载 Cloudflare 官方 cloudflared {VERSION}（约 53 MB），保存至 {DEPENDENCIES}", flush=True)
     try:
         digest = hashlib.sha256()
-        request = urllib.request.Request(DOWNLOAD_URL, headers={"User-Agent": "TractorSimulator"})
+        request = urllib.request.Request(url, headers={"User-Agent": "TractorSimulator"})
         with urllib.request.urlopen(request, timeout=45) as response, temporary.open("wb") as output:
             while chunk := response.read(1024 * 1024):
                 digest.update(chunk)
                 output.write(chunk)
-        if digest.hexdigest() != WINDOWS_SHA256:
+        if digest.hexdigest() != expected:
             raise ValueError("cloudflared SHA256 校验失败，请重试；没有执行下载文件")
         temporary.replace(binary)
-        (DEPENDENCIES / "download.json").write_text(json.dumps({"version": VERSION, "url": DOWNLOAD_URL,
-                          "sha256": WINDOWS_SHA256}, indent=2), encoding="utf-8")
+        if system == "Linux": binary.chmod(0o700)
+        (DEPENDENCIES / "download.json").write_text(json.dumps({"version": VERSION, "url": url,
+                          "sha256": expected}, indent=2), encoding="utf-8")
         return binary
     finally:
         temporary.unlink(missing_ok=True)
@@ -166,7 +173,7 @@ class Tunnel:
             raise ValueError("mode 须为 quick 或 named")
         self.connected = threading.Event()
         try:
-            self.log = (runtime / "tunnel.log").open("w", encoding="utf-8")
+            self.log = (runtime / "tunnel.log").open("a", encoding="utf-8")
             self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            text=True, encoding="utf-8", errors="replace", cwd=str(runtime),
                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
@@ -179,6 +186,10 @@ class Tunnel:
 
     def read_output(self):
         for line in self.process.stdout:
+            if self.log.tell() >= 5 * 1024 * 1024:
+                self.log.close()
+                (self.runtime / "tunnel.log").replace(self.runtime / "tunnel.log.1")
+                self.log = (self.runtime / "tunnel.log").open("w", encoding="utf-8")
             # cloudflared settings may contain credentials for a named tunnel.
             line = re.sub(r"(?i)(token[:= ]+)[^\s\],}]+", r"\1[redacted]", line)
             self.log.write(line); self.log.flush()

@@ -144,6 +144,8 @@ class TakeoverAPI(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(self.request('/api/seat/confirm', {'seat': seat}, client['token'])[0], 200)
             clients.append(client)
+            if seat == 0:
+                _, waiter = self.request('/api/session', {'mode': 'pvp', 'room': 'takeover_http'})
         self.assertEqual(self.request('/api/room/start', {}, clients[0]['token'])[0], 200)
         for value in ('true', 1, None, [], {}):
             self.assertEqual(self.request('/api/autoplay', {'enabled': value}, clients[1]['token'])[0], 400)
@@ -155,7 +157,6 @@ class TakeoverAPI(unittest.TestCase):
         self.assertEqual(peer['players'][1]['name'], 'Human 1')
         status, error = self.request('/api/validate', {'action': {'type': 'pass'}}, clients[1]['token'])
         self.assertEqual((status, error['code']), (422, 'AI_CONTROLLED'))
-        _, waiter = self.request('/api/session', {'mode': 'pvp', 'room': 'takeover_http'})
         status, error = self.request('/api/autoplay', {'enabled': True}, waiter['token'])
         self.assertEqual((status, error['code']), (422, 'SEAT_REQUIRED'))
         status, own = self.request('/api/autoplay', {'enabled': False}, clients[1]['token'])

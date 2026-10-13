@@ -19,6 +19,7 @@ def main():
                                       "stop-public.ps1", "stop-public.bat", "internet.json", "pyproject.toml", "THIRD_PARTY.md")]
     files += [ROOT / "docs" / name for name in ("deployment.md", "internet.md", "api.md", "validation.md", "双升游戏规则.录音原版.md")]
     files += [ROOT / "docs" / name for name in ("ai.md", "ai-evaluation.md", "replay.md")]
+    files += [ROOT / "docs" / name for name in ("linux-service.md", "room-ai-replacement-desktop.png", "room-ai-replacement-mobile.png", "room-active-join-rejected.png", "room-lifecycle-validation.json")]
     for name in ("ai-benchmark.json", "ai-http-validation.json", "ai-evaluation.json", "ai-rule-cases.json", "ai-manual-evaluation.json"):
         if (ROOT / "docs" / name).is_file():
             files.append(ROOT / "docs" / name)

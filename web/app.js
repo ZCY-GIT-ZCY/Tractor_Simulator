@@ -34,7 +34,7 @@ async function api(path,data){
  const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),12000);
  try{
   const response=await fetch(path,{method:data===undefined?'GET':'POST',headers:{...(data===undefined?{}:{'Content-Type':'application/json'}),...(token?{'Authorization':'Bearer '+token}:{})},body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal});
-  const result=await response.json();
+  let result;try{result=await response.json();}catch{throw new Error(response.status===429?'连接繁忙，请稍后重试':response.ok?'服务器返回异常，请重新连接':'网络暂时不可用，请稍后重试');}
   if(!response.ok){const e=new Error(result.message||'请求失败');e.code=result.code||result.error;e.status=response.status;throw e;}
   return result;
  }finally{clearTimeout(timeout);}
@@ -76,7 +76,7 @@ function renderPlayers(){
      `<div class="side-hand">${visible.map(c=>`<div class="card-chip ${suit(c)==='H'||suit(c)==='D'?'red':''}" title="${cardName(c)}">${label(rank(c))}<span>${rank(c)>14?'✦':symbols[suits.indexOf(suit(c))]}</span></div>`).join('')}</div>`;
   }else if(pos!=='south'&&s.hand_counts[p.seat])hand='<div class="hidden-stack"></div>';
   if(visible)previousHands[p.seat]=new Set(visible);
-  return `<div class="seat ${pos} ${active?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${banker===p.seat?'<b class="banker-badge">庄</b>':''}</strong>${p.takeover?'<span class="ai-control-badge">AI 托管</span>':''}<small>${s.hand_counts[p.seat]} 张 · ${p.seat%2?'金队':'青队'}${!p.online?' · 离线':''}</small></div></div>${hand}</div>`;
+  return `<div class="seat ${pos} ${active?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${banker===p.seat?'<b class="banker-badge">庄</b>':''}</strong>${p.takeover||p.bot?`<span class="ai-control-badge">${p.bot?'AI 补位':'AI 托管'}</span>`:''}<small>${s.hand_counts[p.seat]} 张 · ${p.seat%2?'金队':'青队'}${!p.online?' · 离线':''}</small></div></div>${hand}</div>`;
  }).join('');
 }
 function renderPlays(){
@@ -218,31 +218,34 @@ function renderLobby(){
  const seated=snap.seat!=null,waiting=!snap.started||!seated;
  $('lobbyOverlay').hidden=!waiting&&!roomManagerOpen;
  $('closeRoomSeats').hidden=waiting;
- $('lobbyTitle').textContent=snap.started?'房间席位':'好牌，从入座开始。';
+ const open=snap.seat_selection_open??!snap.started,between=!!snap.between_rounds;
+ $('lobbyTitle').textContent=between&&!seated?'下一局，等你入座。':snap.started?'房间席位':'好牌，从入座开始。';
  $('lobbyCode').textContent=snap.room;
  $('lobbyConfig').textContent='打 '+label(snap.config.initial_level)+(snap.config.auction?' · 首局抢庄':' · '+seatDirections[snap.config.banker]+'席坐庄');
  if(seated)tentativeSeat=snap.seat;
- else if(tentativeSeat!=null&&snap.players[tentativeSeat]?.occupied)tentativeSeat=null;
+ else if(tentativeSeat!=null&&!seatAvailable(tentativeSeat))tentativeSeat=null;
  const occupied=snap.players.filter(p=>p.occupied).length;
- $('lobbySeatHint').textContent=seated?(snap.started?`你在${seatDirections[snap.seat]}席 · 开局后座位固定`:`已确认${seatDirections[snap.seat]}席 · 可取消后重新选座`):tentativeSeat==null?'点击一个空席，按确定后才占用':`已预选${seatDirections[tentativeSeat]}席 · 尚未占用，按确定入座`;
+ $('lobbySeatHint').textContent=seated?(snap.started?`你在${seatDirections[snap.seat]}席 · 开局后座位固定`:`已确认${seatDirections[snap.seat]}席 · 可取消后重新选座`):!open?'本局已开始，请等两局之间再选择 AI 席位':tentativeSeat==null?(between?'选择一个 AI 席位，确认后接替参加下一局':'选择空席或 AI 席位，按确定后才占用'):`已预选${seatDirections[tentativeSeat]}席 · ${snap.players[tentativeSeat]?.bot?'确认后替换 AI':'按确定入座'}`;
  $('lobbySeats').innerHTML=snap.players.map(p=>{
   const mine=seated&&p.seat===snap.seat,chosen=p.seat===tentativeSeat;
-  const disabled=seatBusy||p.occupied||seated;
+  const disabled=seatBusy||!seatAvailable(p.seat)||seated;
   const aiControl=snap.host&&(!p.occupied||p.bot&&!snap.started);
-  return `<div class="seat-choice ${['south','west','north','east'][p.seat]} ${p.occupied?'occupied':''} ${mine?'mine':''} ${chosen?'chosen':''} ${p.bot?'ai-seat':''}"><button class="seat-pick" data-seat-pick="${p.seat}" aria-label="${seatDirections[p.seat]}席${p.occupied?' · '+esc(p.name):' · 空席'}" aria-pressed="${chosen}" ${disabled?'disabled':''}><span class="seat-direction">${seatDirections[p.seat]}<small>${p.seat} 座 · ${p.seat%2?'金队':'青队'}</small></span><strong>${p.occupied?esc(p.name):chosen?'等待你确认':'空席'}</strong><small>${mine?'你已确认':p.bot?'本地 AI 策略':p.occupied?p.online?'已确认入座':'已确认 · 离线':'可以选择'}</small></button>${aiControl?`<button class="seat-ai-toggle" data-seat-ai="${p.seat}" data-enabled="${!p.bot}" ${seatBusy||!p.bot&&!seated?'disabled':''} aria-label="${seatDirections[p.seat]}席${p.bot?'移除':'添加'}AI">${p.bot?'移除 AI':'＋ AI 补位'}</button>`:''}</div>`;
+  return `<div class="seat-choice ${['south','west','north','east'][p.seat]} ${p.occupied?'occupied':''} ${mine?'mine':''} ${chosen?'chosen':''} ${p.bot?'ai-seat':''}"><button class="seat-pick" data-seat-pick="${p.seat}" aria-label="${seatDirections[p.seat]}席${p.occupied?' · '+esc(p.name):' · 空席'}" aria-pressed="${chosen}" ${disabled?'disabled':''}><span class="seat-direction">${seatDirections[p.seat]}<small>${p.seat} 座 · ${p.seat%2?'金队':'青队'}</small></span><strong>${p.occupied?esc(p.name):chosen?'等待你确认':'空席'}</strong><small>${mine?'你已确认':p.bot?open&&!seated?'可接替 AI · 点击选择':'本地 AI 策略':p.occupied?p.online?'已确认入座':'已确认 · 离线':'可以选择'}</small></button>${aiControl?`<button class="seat-ai-toggle" data-seat-ai="${p.seat}" data-enabled="${!p.bot}" ${seatBusy||!p.bot&&!seated?'disabled':''} aria-label="${seatDirections[p.seat]}席${p.bot?'移除':'添加'}AI">${p.bot?'移除 AI':'＋ AI 补位'}</button>`:''}</div>`;
  }).join('')+'<div class="seat-compass"><span>对家同队</span><small>四席 · 一桌</small></div>';
  for(const button of $('lobbySeats').querySelectorAll('[data-seat-pick]'))button.onclick=()=>chooseSeat(Number(button.dataset.seatPick));
  for(const button of $('lobbySeats').querySelectorAll('[data-seat-ai]'))button.onclick=()=>roomAction('/api/room/ai',{seat:Number(button.dataset.seatAi),enabled:button.dataset.enabled==='true'});
  $('confirmSeatButton').hidden=seated;$('confirmSeatButton').disabled=seatBusy||tentativeSeat==null;
+ $('confirmSeatButton').textContent=tentativeSeat!=null&&snap.players[tentativeSeat]?.bot?'确认接替 AI →':'确定选座 →';
  $('cancelSeatButton').hidden=!seated||snap.started;$('cancelSeatButton').disabled=seatBusy;
  $('fillAIButton').hidden=!snap.host;$('fillAIButton').disabled=seatBusy||!seated||occupied===4;
  $('startRoomButton').hidden=!snap.host||snap.started;$('startRoomButton').disabled=seatBusy||!snap.can_start;
- $('lobbyReady').textContent=snap.started?snap.paused?'有空席或玩家离线 · 等待补位或重连':'对局进行中':`${occupied} / 4 席已就绪${occupied===4?' · 等待房主开始':' · 可用 AI 补齐空席'}`;
+ $('lobbyReady').textContent=between?'两局之间 · 确认入座后，由房主开始下一局':snap.started?snap.paused?'有玩家离线 · 等待重连':'对局进行中 · 暂不接纳新玩家':`${occupied} / 4 席已就绪${occupied===4?' · 等待房主开始':' · 可用 AI 补齐空席'}`;
  $('lobbyWaitingPeople').innerHTML=(snap.members||[]).filter(m=>m.seat==null).map(m=>`<span>${esc(m.name)}${m.self?' · 你':''}待选座</span>`).join('');
- $('lobbyHelp').textContent=snap.started?'断线保留原座位；真人主动离开的空席，可由新玩家确认入座或房主补 AI。':'选座预览仅自己可见，确认后才锁定。取消会释放席位；房主可用本地 AI 补齐空席，四席就绪后开始。';
+ $('lobbyHelp').textContent=snap.started?'主动离开后 AI 自动接管；断线保留座位、等待重连。新牌友仅能在两局之间接替 AI，确认前不会占座。':'选座预览仅自己可见，确认后锁定，可直接接替 AI。主动离开后 AI 补位；房主确认四席就绪后开始。';
 }
+function seatAvailable(seat){const p=snap?.players[seat];return !!p&&(snap.seat_selection_open??!snap.started)&&(!p.occupied||p.bot);}
 function chooseSeat(seat){
- if(!snap||mode!=='pvp'||seatBusy||snap.seat!=null||snap.players[seat]?.occupied)return;
+ if(!snap||mode!=='pvp'||seatBusy||snap.seat!=null||!seatAvailable(seat))return;
  tentativeSeat=seat;renderLobby();
 }
 async function roomAction(path,body={}){

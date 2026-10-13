@@ -69,8 +69,7 @@ class RoomAPI(unittest.TestCase):
         self.assertFalse(delegated['autoplay'])
         self.assertEqual(self.request('/api/autoplay',{'enabled':False},clients[1]['token'])[0],200)
         status,waiting=self.request('/api/session',{'mode':'pvp','room':'test_four','name':'fifth'})
-        self.assertEqual(status,200);self.assertIsNone(waiting['seat']);self.assertIsNone(waiting['state'])
-        self.assertEqual(waiting['controlled'],[])
+        self.assertEqual(status,422);self.assertEqual(waiting['code'],'IN_PROGRESS')
 
     def test_stale_action_atomic_and_auth(self):
         _,s=self.request('/api/session',{'mode':'self','seed':3})
@@ -285,18 +284,17 @@ class RoomAPI(unittest.TestCase):
                 room.can_act(clients[0]['token'], {'type': 'pass'})
             self.assertEqual(error.exception.code, 'PAUSED')
 
-    def test_leave_transfers_host_and_replacement_keeps_existing_hand(self):
+    def test_leave_transfers_host_and_automatically_delegates_without_mid_hand_join(self):
         clients = self.seated_room('host_leaves')
         _, before = self.request('/api/state', token=clients[0]['token'])
         self.assertEqual(self.request('/api/leave', {}, clients[0]['token'])[0], 200)
         _, remaining = self.request('/api/state', token=clients[1]['token'])
-        self.assertTrue(remaining['host']); self.assertTrue(remaining['paused'])
-        _, replacement = self.request('/api/session', {'mode': 'pvp', 'room': 'host_leaves'})
-        self.assertIsNone(replacement['seat'])
-        _, replacement = self.request('/api/seat/confirm', {'seat': 0}, replacement['token'])
-        self.assertEqual(replacement['seat'], 0)
-        self.assertFalse(replacement['host']); self.assertFalse(replacement['paused'])
-        self.assertEqual(replacement['state']['hand'], before['state']['hand'])
+        self.assertTrue(remaining['host']); self.assertFalse(remaining['paused'])
+        self.assertTrue(remaining['players'][0]['bot'])
+        status, error = self.request('/api/session', {'mode': 'pvp', 'room': 'host_leaves'})
+        self.assertEqual((status, error['code']), (422, 'IN_PROGRESS'))
+        self.assertEqual(self.request('/api/leave', {}, clients[0]['token'])[0], 200)
+        self.assertEqual(self.request('/api/state', token=clients[0]['token'])[0], 403)
 
     def test_autoplay_does_not_treat_string_false_as_true(self):
         _, session = self.request('/api/session', {'mode': 'self'})

@@ -77,6 +77,30 @@ function lobby(){
  return data;
 }
 
+test('between hands newcomer previews and confirms an AI chair, preserving preview updates',async()=>{
+ const b=browser(),data=lobby();data.started=true;data.seat_selection_open=true;data.between_rounds=true;
+ data.host=false;data.players=data.players.map(p=>({...p,bot:p.seat!==3,occupied:true,online:true,name:p.seat===3?'Host':'Local AI'}));
+ sit(b,data);b.run('chooseSeat(1)');assert.equal(b.get('tentativeSeat'),1);
+ assert.equal(b.element('lobbyTitle').textContent,'下一局，等你入座。');
+ assert.equal(b.element('confirmSeatButton').textContent,'确认接替 AI →');
+ b.context.fixture={...data,version:5};b.run('acceptSnapshot(fixture)');assert.equal(b.get('tentativeSeat'),1);
+ const claiming=b.element('confirmSeatButton').onclick();assert.equal(JSON.parse(latest(b,'/api/seat/confirm').options.body).seat,1);
+ latest(b,'/api/seat/confirm').reply({...ending(),version:6,seat:1,controlled:[1],host:false,seat_selection_open:true,between_rounds:true});
+ await claiming;assert.equal(b.get('snap.seat'),1);assert.equal(b.element('lobbyOverlay').hidden,true);
+});
+
+test('round starting or a human claiming clears AI preview and blocks confirmation',()=>{
+ const b=browser(),data=lobby();data.seat_selection_open=true;data.players[1]={...data.players[1],occupied:true,bot:true};
+ sit(b,data);b.run('chooseSeat(1)');assert.equal(b.get('tentativeSeat'),1);
+ b.context.fixture={...data,version:5,players:data.players.map(p=>p.seat===1?{...p,bot:false,name:'Human',takeover:true}:p)};
+ b.run('acceptSnapshot(fixture)');assert.equal(b.get('tentativeSeat'),null);
+ b.context.fixture={...data,version:6};b.run('acceptSnapshot(fixture);chooseSeat(1)');
+ b.context.fixture={...data,version:7,started:true,seat_selection_open:false};b.run('acceptSnapshot(fixture)');
+ assert.equal(b.get('tentativeSeat'),null);assert.equal(b.element('confirmSeatButton').disabled,true);
+ b.run('chooseSeat(1)');assert.equal(b.get('tentativeSeat'),null);
+ assert.match(b.element('lobbySeatHint').textContent,/本局已开始/);
+});
+
 test('tentative chair is local only; confirm claims it and cancel releases it',async()=>{
  const b=browser(),data=lobby();sit(b,data);const count=b.requests.length;
  b.run('chooseSeat(3)');assert.equal(b.requests.length,count);assert.equal(b.get('snap.seat'),null);

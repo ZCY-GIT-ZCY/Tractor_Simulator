@@ -84,7 +84,7 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 |---|---|---|
 | `POST /api/session` | `{mode:"self"|"pve"|"pvp",name,room?,seat?,config?,seed?}` | token + 房间快照 |
 | `GET /api/state?since=版本&wait=4` | 无；wait 0..5 秒 | 房间快照，版本无变化时最多等待指定时间 |
-| `POST /api/seat/confirm` | `{seat:0..3}` | PVP 原子确认空席；已占用返回 `SEAT_TAKEN` |
+| `POST /api/seat/confirm` | `{seat:0..3}` | 开局前／局间原子确认空席或替换 AI；真人已占用返回 `SEAT_TAKEN`，本局已开始返回 `IN_PROGRESS` |
 | `POST /api/seat/cancel` | `{}` | PVP 开局前释放自己的确认座位，不退出房间 |
 | `POST /api/room/ai` | `{seat?:0..3,enabled:true|false}` | PVP 房主添加／移除本地 AI；省略 seat 且 enabled=true 补齐全部空席 |
 | `POST /api/room/start` | `{}` | PVP 房主在四席已就绪、已确认真人全部在线时开局 |
@@ -93,7 +93,7 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 | `POST /api/bid` | `{round,redeals,action:{type:"bid",cards:[...]}}` | 仅摸牌阶段实时亮主／反主；按房间锁串行裁判，不因其他人摸牌而拒绝旧版本；后到的同强／较弱亮法返回 422 BID_TOO_WEAK，提示亮主无效 |
 | `POST /api/confirm-result` | `{version}` | 终局由本局庄家确认底牌和计分；非庄家返回 `BANKER_ONLY`，旧 version 返回 409 |
 | `POST /api/autoplay` | `{enabled:true|false}` | self 四家随机托管 / PVE 四家 Enoch 托管；PVP 只开关请求者本人座位的 Enoch AI 托管 |
-| `POST /api/leave` | `{}` | `{ok:true}`，释放会话和座位 |
+| `POST /api/leave` | `{}` | `{ok:true}`，PVP 真人席位自动变为 AI；释放原会话，可安全重试 |
 | `GET /api/health` | 无 | `{ok:true,schema_version:1,service:"tractor_sim",bind_host:监听地址,instance_id:进程随机标识,pve_ai:"enoch-table-v1"}` |
 | `GET /api/site` | 无 | `{public_url:HTTPS入口或null,disconnect_seconds:25,room_idle_seconds:7200}` |
 | `GET /rules` | 无 | 唯一规则文件 UTF-8 文本 |
@@ -107,6 +107,10 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 PVP 的 `/api/autoplay` 无须提交全桌 version，仅操作当前 token 的已确认座位，不能替其他玩家开关。未选座返回 `SEAT_REQUIRED`，尚未开局返回 `LOBBY`，enabled 必须是 JSON 布尔值。托管不改变手牌可见范围，保留 seat/name/controlled；托管时手动游戏动作返回 `AI_CONTROLLED`，取消后恢复。开启、取消、离开或换控制者均改变该席控制代次，异步 AI 结果同时核对环境 revision 和控制代次，取消后立即重开也不能执行旧结果。开关在同一房间跨局保留，离开后不继承给新玩家；房主仍负责开始下一局。已托管的真人断线不触发暂停，其他真人仍保留原来的 25 秒断线暂停规则。
 
 PVP 房间号 3..24 位 ASCII 字母、数字、下划线或短横线，区分大小写；省略 room 或留空时创建随机 8 位房间号。后进入者采用第一人配置；最多 16 名房间成员、4 个可玩席位。创建 PVP 会话始终返回未选座，session 请求中的 seat 不会占位；南/西/北/东对应 0/1/2/3，0/2 与 1/3 同队。预选仅是前端状态，确定才请求服务器占座，取消后释放。四席就绪也不自动开始，由已入座房主显式开始；房主配置 AI 前也须先确认自己的座位。
+
+PVP 新会话只在开局前或 `round_end` 局间接纳，`dealing/final_bidding/burying/countering/playing` 返回 `IN_PROGRESS`，四席均为真人返回 `ROOM_FULL`，`match_end` 返回 `MATCH_FINISHED`。已入房但未选座者也须在确认时重新检查阶段；预选 AI 不预留席位，两人同时确认同一 AI 席位只接受一个。托管真人仍是该真人所有的席位，不能被新人接替。补位不重置环境、级别、庄家、底牌或结算核对状态。
+
+快照新增 `seat_selection_open`（当前允许确认座位）、`between_rounds`（局间）。主动离开和网络断线分开处理：离开自动转为 AI，昵称保留为“原昵称（AI 接替）”，旧凭据立即失效；断线仍保留原席，未托管真人离线 25 秒暂停。房主离开优先移交在座真人。庄家离开后由 AI 按原有六秒底牌展示流程确认。最后一个真人离开时四个 AI 打完本局即停，不会自行开始下一局；局间可以重新加入接替 AI，整房无人使用两小时后回收。
 
 选座与房间配置接口在房间锁下原子处理，无须全局 version，以免不同席位同时确认互相干扰。同席竞争只允许一人成功。已确认者须先取消才能改座；开局后 cancel 返回 `SEATS_LOCKED`。开局后不能移除 AI 或覆盖任何已确认真人（包括离线真人），但真人主动离开的空席可由新人确认或房主补 AI，使用该席现有手牌继续。AI 与 PVE 共用本地策略运行池，每席仅接收自己的观察并经过同一规则裁判。新一局只有房主可以触发，普通出牌只能是自己座位。网络重试先取快照、核对 version，再提交；避免自动重复出牌。
 
