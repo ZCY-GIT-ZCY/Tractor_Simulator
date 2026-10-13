@@ -105,19 +105,24 @@ function buildTimeline(){
 }
 function renderTable(f){
  const s=f.state,banker=s.result?.banker??s.banker,actor=f.actor??s.current_player;
+ const noticeLabels={throw:'甩牌',ruff:'杀牌',overruff:'盖杀',trump_lead:'调主'};
+ const announcement=(f.events||[]).find(e=>e.type==='play'&&e.notices?.length);
  const handSort=cards=>TractorHandOrder.sort(cards,s.level,s.trump);
  $('replayPlayers').innerHTML=record.meta.players.map(p=>{
   const pos=['south','west','north','east'][p.seat],cards=handSort(s.hands[p.seat]);
   const hand=!cards.length?'':['north','south'].includes(pos)?`<div class="mini-hand">${cards.map(c=>cardHTML(c,s)).join('')}</div>`:
    `<div class="side-hand">${cards.map(c=>`<div class="card-chip ${red(c)?'red':''}">${label(rank(c))}<span>${rank(c)>14?'✦':symbols[suits.indexOf(suit(c))]}</span></div>`).join('')}</div>`;
-  return `<div class="seat ${pos} ${actor===p.seat?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${p.seat===banker?'<b class="banker-badge">庄</b>':''}</strong><small>${cards.length} 张 · ${p.seat%2?'金队':'青队'}</small></div></div>${hand}</div>`;
+  const notices=announcement?.player===p.seat?announcement.notices.filter(n=>Object.hasOwn(noticeLabels,n)):[];
+  const bubble=notices.length?`<div class="play-notices">${notices.map(n=>`<span class="play-notice ${n}">${noticeLabels[n]}</span>`).join('')}</div>`:'';
+  return `<div class="seat ${pos} ${actor===p.seat?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${p.seat===banker?'<b class="banker-badge">庄</b>':''}</strong><small>${cards.length} 张 · ${p.seat%2?'金队':'青队'}</small></div></div>${hand}${bubble}</div>`;
  }).join('');
  const declaration=['dealing','final_bidding','burying','countering'].includes(s.phase);
  const plays=declaration?(s.bid?[s.bid]:[]):s.trick.length?s.trick:s.last_trick?.plays||[];
+ const winner=declaration?null:s.trick.length>=2?s.trick_winner??null:s.trick.length?null:s.last_trick?.winner??null;
  $('replayPlays').innerHTML=plays.map((p,i)=>{
   const pos=['south','west','north','east'][p.player],width=$('replayTable').clientWidth,cardWidth=innerWidth<=760?32:44;
   const step=Math.min(cardWidth-18,Math.max(5,(width*(['north','south'].includes(pos)?0.72:0.36)-cardWidth)/Math.max(1,p.cards.length-1)));
-  return `<div class="play ${pos} ${declaration?'declaration':''} ${s.trick.length&&i===plays.length-1?'fresh':''} ${!declaration&&!s.trick.length&&s.last_trick?.winner===p.player?'winner':''}" style="--play-overlap:${step-cardWidth}px">${p.cards.map(c=>cardHTML(c,s)).join('')}${declaration?`<span class="declaration-label">${trumpName(s.trump)} · 已亮牌</span>`:''}</div>`;
+  return `<div class="play ${pos} ${declaration?'declaration':''} ${s.trick.length&&i===plays.length-1?'fresh':''} ${winner===p.player?'winner':''}" style="--play-overlap:${step-cardWidth}px">${p.cards.map(c=>cardHTML(c,s)).join('')}${winner===p.player?`<span class="trick-winner">${s.trick.length?'当前最大':'本轮最大'}</span>`:''}${declaration?`<span class="declaration-label">${trumpName(s.trump)} · 已亮牌</span>`:''}</div>`;
  }).join('');
  $('replayTableStatus').textContent=['round_end','match_end'].includes(s.phase)?'本局已结束':s.phase==='playing'?(s.trick.length?`${nameOf(s.current_player)} 须跟 ${s.trick[0].cards.length} 张`:`${nameOf(s.current_player)} 领出`):`${phaseText(s.phase)} · ${nameOf(s.current_player)}`;
  $('replayKitty').innerHTML=s.kitty_public&&s.kitty?.length?`公开底牌<div style="display:flex">${s.kitty.map(c=>cardHTML(c,s)).join('')}</div>`:s.phase==='burying'?'底牌已收入手中':'底牌 · 不明示';
@@ -126,7 +131,7 @@ function renderTable(f){
  $('replayBottom').innerHTML=bottom?`<span>本局底牌 · 八张</span><div class="settlement-cards">${bottom.map(c=>cardHTML(c,s)).join('')}</div>`:'';
  $('replayPrivacyText').textContent=bottom?'四家手牌可见 · 本局底牌已公开':s.kitty_public?'四家手牌可见 · 翻底定主，底牌已公开':'四家手牌可见 · 对局中底牌不明示';
  $('replayLevel').textContent=label(s.level);$('replayTrump').textContent=s.phase==='dealing'&&!s.bid?'待亮主':trumpName(s.trump);
- $('replayScore').textContent=s.score;$('replayTrick').textContent=s.phase==='playing'?`第 ${s.trick_no+1} 轮`:phaseText(s.phase);
+ $('replayScore').textContent=s.score;$('replayTrick').textContent=s.phase==='playing'?`第 ${s.trick.length?s.trick_no+1:s.last_trick?.number??s.trick_no+1} 轮${!s.trick.length&&s.last_trick?'已结算':''}`:phaseText(s.phase);
  renderHand();
 }
 function renderHand(){

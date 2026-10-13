@@ -60,6 +60,56 @@ function sit(browser,data=snapshot()) {
 }
 function latest(browser,path){return browser.requests.findLast(r=>r.url===path);}
 
+function playingSnapshot(plays=[],winner=null,events=[],version=4,trickNo=0,last=null){
+ const data=snapshot();data.version=version;
+ data.state={...data.state,phase:'playing',trump:'H',trick:plays,trick_winner:winner,
+  events,public_history:events,trick_no:trickNo,last_trick:last};
+ return data;
+}
+
+test('play notices attach to the actor, expire once, and ignore repeated snapshots',()=>{
+ const b=browser();sit(b,playingSnapshot());
+ const event={type:'play',seq:10,player:2,trick_number:1,notices:['throw','trump_lead']};
+ b.context.fixture=playingSnapshot([{player:2,cards:[14,26]}],null,[event],5);
+ b.run('acceptSnapshot(fixture)');
+ assert.match(b.element('playersLayer').innerHTML,/甩牌/);assert.match(b.element('playersLayer').innerHTML,/调主/);
+ const timer=b.get('playNoticeTimers.get(2)');
+ b.run('acceptSnapshot(fixture)');assert.equal(b.get('playNoticeTimers.get(2)'),timer);
+ assert.equal(b.get('playNotices.size'),1);
+ b.timers.get(timer).fn();assert.doesNotMatch(b.element('playersLayer').innerHTML,/play-notices/);
+});
+
+test('winner appears after two plays, remains after four, and clears on the next lead',()=>{
+ const b=browser(),lead={player:0,cards:[7]},cut={player:3,cards:[19]};
+ sit(b,playingSnapshot([lead],null));assert.doesNotMatch(b.element('playsLayer').innerHTML,/trick-winner/);
+ const events=[{type:'play',seq:10,player:3,trick_number:1,notices:['ruff']}];
+ b.context.fixture=playingSnapshot([lead,cut],3,events,5);b.run('acceptSnapshot(fixture)');
+ assert.match(b.element('playsLayer').innerHTML,/play east[^\"]*winner/);
+ assert.match(b.element('playsLayer').innerHTML,/当前最大/);assert.match(b.element('playersLayer').innerHTML,/杀牌/);
+ b.context.fixture=playingSnapshot([lead,cut,{player:2,cards:[18]}],3,[...events,{type:'play',seq:11,player:2,trick_number:1,notices:[]}],6);
+ b.run('acceptSnapshot(fixture)');assert.match(b.element('playsLayer').innerHTML,/play east[^\"]*winner/);
+ assert.equal(b.get('playNotices.has(2)'),false);
+ const fourth={type:'play',seq:12,player:1,trick_number:1,notices:['overruff']};
+ const last={number:1,plays:[lead,cut,{player:2,cards:[18]},{player:1,cards:[25]}],winner:1};
+ b.context.fixture=playingSnapshot([],null,[...events,fourth],7,1,last);b.run('acceptSnapshot(fixture)');
+ assert.match(b.element('playsLayer').innerHTML,/play west[^\"]*winner/);
+ assert.match(b.element('playsLayer').innerHTML,/本轮最大/);assert.match(b.element('playersLayer').innerHTML,/盖杀/);
+ assert.match(b.element('tableHint').textContent,/第 1 轮已结算/);
+ b.context.fixture=playingSnapshot([{player:1,cards:[40]}],null,[...events,fourth],8,1,last);b.run('acceptSnapshot(fixture)');
+ assert.doesNotMatch(b.element('playsLayer').innerHTML,/trick-winner/);
+ assert.equal(b.get('playNotices.size'),0);assert.equal(b.get('playNoticeTimers.size'),0);
+});
+
+test('bootstrap does not replay old notifications; batched updates show only the visible trick',()=>{
+ const b=browser();sit(b,playingSnapshot());
+ const old={type:'play',seq:8,player:3,trick_number:1,notices:['ruff']};
+ const fresh={type:'play',seq:9,player:2,trick_number:2,notices:['trump_lead']};
+ b.context.fixture=playingSnapshot([{player:2,cards:[19]}],null,[old,fresh],5,1);b.run('acceptSnapshot(fixture)');
+ assert.doesNotMatch(b.element('playersLayer').innerHTML,/杀牌/);assert.match(b.element('playersLayer').innerHTML,/调主/);
+ b.run('resetUI();snap=null;acceptSnapshot(fixture)');
+ assert.doesNotMatch(b.element('playersLayer').innerHTML,/play-notices/);
+});
+
 test('a changed release prompts refresh without discarding the current seat or session',async()=>{
  const b=browser(),data=snapshot();sit(b,data);
  const first=b.run("api('/api/state')");latest(b,'/api/state').reply(data,200,'release_one');await first;

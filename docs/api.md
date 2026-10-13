@@ -60,6 +60,10 @@
 
 `drawn_card` 仅在 dealing 且观察座位正是本次摸牌者时返回实体牌 id，否则为 null。进入 final_bidding／拿底／出牌后清空，教学四家手牌也不覆盖这一字段。
 
+`trick_winner` 在本轮已有两家或三家出牌时，返回裁判判定的当前最大者座位；不足两家或当前轮已结算时为 null。四家出完后使用 `last_trick.winner`，直到下一轮第一手出牌。两者只使用公开已出的牌，不透露其他手牌。
+
+接受动作后的 `play` 事件新增 `trick_number`、`winner` 和 `notices`。通知值为 `throw`（领出甩牌尝试，含甩错）、`trump_lead`（首家领出主牌）、`ruff`（主牌完整匹配副牌领出、且实际成为当前最大）、`overruff`（进一步压过先前杀牌）。调主的跟主、普通同门压大、未匹配牌型或未压过现有最大者的全主跟牌不产生杀牌通知。主牌甩牌可同时有 `throw` 和 `trump_lead`。前端在行动者旁短暂显示通知，重复快照不重新弹出，进入下一轮清除；新回放保存同一通知和当前最大者。
+
 `played_cards` 为本局已公开出过的全部实体牌，含当前轮的实际出牌。`public_history` 为本局公开的 bid、kitty_picked_up、kitty_buried、play、throw_failed 事件；拿底/扣底事件只有操作玩家，不含底牌。它不会随 `events` 的最近 80 条窗口截断，用于策略追踪未知牌及公开缺门。下局及重新洗牌时清空；这两项为 schema 1 的兼容新增字段。
 
 PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明见 [AI 文档](ai.md)。网页房间快照新增 `ai`（PVE 的 `{id, name}`，其他模式 null）与 `bot_thinking`（后台决策进行中）。这些字段不含采样手牌和搜索评分。显式 `policy_factory` 为各座分别创建实例，可覆盖默认策略；计算结果通过 revision 检查后才转移环境。

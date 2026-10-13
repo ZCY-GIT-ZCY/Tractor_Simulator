@@ -304,7 +304,10 @@ class TractorEnv:
 
     def _play(self, cards, player):
         attempted = cards[:]
-        if not self.trick and describe(cards, self.level, self.trump)["kind"] == "throw":
+        leading = not self.trick
+        notices = []
+        if leading and describe(cards, self.level, self.trump)["kind"] == "throw":
+            notices.append('throw')  # Includes a failed, accepted throw attempt.
             others = [h for p, h in enumerate(self.hands) if p != player]
             if not throw_succeeds(cards, others, self.level, self.trump):
                 penalty = len(cards) * 10
@@ -313,14 +316,23 @@ class TractorEnv:
                 cards = minimal_unit(cards, self.level, self.trump)
                 self._event("throw_failed", player=player, attempted=attempted, cards=cards[:], penalty=penalty,
                             score_delta=delta)
+        if leading and effective_suit(cards[0], self.level, self.trump) == 'T':
+            notices.append('trump_lead')
+        ruffing = (not leading and effective_suit(self.trick[0]['cards'][0], self.level, self.trump) != 'T'
+                   and all(effective_suit(c, self.level, self.trump) == 'T' for c in cards))
+        previous_winner = self._trick_winner() if ruffing else None
+        previous_cards = next((p['cards'] for p in self.trick if p['player'] == previous_winner), [])
         self.hands[player] = [c for c in self.hands[player] if c not in cards]
         self.played.extend(cards)
         self.trick.append({"player": player, "cards": cards[:]})
-        self._event("play", player=player, cards=cards[:])
+        winner = self._trick_winner() if len(self.trick) >= 2 else player
+        if ruffing and winner == player:
+            notices.append('overruff' if effective_suit(previous_cards[0], self.level, self.trump) == 'T' else 'ruff')
+        self._event("play", player=player, cards=cards[:], notices=notices,
+                    trick_number=self.trick_no + 1, winner=winner if len(self.trick) >= 2 else None)
         if len(self.trick) < 4:
             self.current_player = self.next_seat(player)
             return
-        winner = self._trick_winner()
         trick_points = sum(points(c) for play in self.trick for c in play["cards"])
         if winner % 2 != self.banker % 2:
             self.captured_score += trick_points; self.score += trick_points
@@ -438,6 +450,7 @@ class TractorEnv:
                "drawn_card": self.deck[self.deal_count - 1] if self.phase == "dealing" and player == self.current_player else None,
                "forced_play": self.forced_play(player),
                "redeals": self.redeals, "trick": copy.deepcopy(self.trick), "trick_no": self.trick_no,
+               "trick_winner": self._trick_winner() if len(self.trick) >= 2 else None,
                "last_trick": copy.deepcopy(self.last_trick), "score": self.score,
                "captured_score": self.captured_score, "penalty_score": self.penalty_score,
                "bottom_score": self.bottom_score, "result": copy.deepcopy(self.result),

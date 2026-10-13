@@ -13,6 +13,9 @@ let handKey='', selectionScopeKey='', forcedSelectionKey='', validationTicket=0,
 let previousHands=[new Set(),new Set(),new Set(),new Set()], previousPlay='';
 let drawTurnKey='', visibleDraw=null;
 let bidNoticeTimer;
+const playNoticeLabels={throw:'甩牌',ruff:'杀牌',overruff:'盖杀',trump_lead:'调主'};
+const playNotices=new Map(),playNoticeTimers=new Map();
+let playNoticeScope='';
 let biddingTimer=null,biddingEndAt=0;
 let tentativeSeat=null,seatBusy=false,roomManagerOpen=false;
 let takeoverBusy=false;
@@ -82,19 +85,45 @@ function renderPlayers(){
      `<div class="side-hand">${visible.map(c=>`<div class="card-chip ${suit(c)==='H'||suit(c)==='D'?'red':''}" title="${cardName(c)}">${label(rank(c))}<span>${rank(c)>14?'✦':symbols[suits.indexOf(suit(c))]}</span></div>`).join('')}</div>`;
   }else if(pos!=='south'&&s.hand_counts[p.seat])hand='<div class="hidden-stack"></div>';
   if(visible)previousHands[p.seat]=new Set(visible);
-  return `<div class="seat ${pos} ${active?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${banker===p.seat?'<b class="banker-badge">庄</b>':''}</strong>${p.takeover||p.bot?`<span class="ai-control-badge">${p.bot?'AI 补位':'AI 托管'}</span>`:''}<small>${s.hand_counts[p.seat]} 张 · ${p.seat%2?'金队':'青队'}${!p.online?' · 离线':''}</small></div></div>${hand}</div>`;
+  const notice=playNotices.get(p.seat);
+  const bubble=notice?`<div class="play-notices" role="status" aria-label="${esc(p.name)}：${notice.map(n=>playNoticeLabels[n]).join('、')}">${notice.map(n=>`<span class="play-notice ${n}">${playNoticeLabels[n]}</span>`).join('')}</div>`:'';
+  return `<div class="seat ${pos} ${active?'active':''}"><div class="player-badge"><div class="avatar">${p.seat}</div><div class="player-text"><strong>${esc(p.name)}${banker===p.seat?'<b class="banker-badge">庄</b>':''}</strong>${p.takeover||p.bot?`<span class="ai-control-badge">${p.bot?'AI 补位':'AI 托管'}</span>`:''}<small>${s.hand_counts[p.seat]} 张 · ${p.seat%2?'金队':'青队'}${!p.online?' · 离线':''}</small></div></div>${hand}${bubble}</div>`;
  }).join('');
 }
 function renderPlays(){
  const s=snap.state,declaration=['dealing','final_bidding','burying','countering'].includes(s.phase);
  const show=declaration?(s.bid?[s.bid]:[]):s.trick.length?s.trick:s.last_trick?.plays||[];
  const current=JSON.stringify(show),fresh=current!==previousPlay&&s.trick.length;
+ const winner=declaration?null:s.trick.length>=2?s.trick_winner??null:s.trick.length?null:s.last_trick?.winner??null;
  $('playsLayer').innerHTML=show.map(p=>{
   const pos=position(p.player),width=$('table').clientWidth,cardWidth=innerWidth<=760?32:44;
   const step=Math.min(cardWidth-18,Math.max(5,(width*(['north','south'].includes(pos)?0.72:0.36)-cardWidth)/Math.max(1,p.cards.length-1)));
-  return `<div class="play ${pos} ${declaration?'declaration':''} ${fresh&&p===show[show.length-1]?'fresh':''} ${!declaration&&!s.trick.length&&s.last_trick?.winner===p.player?'winner':''}" style="--play-overlap:${step-cardWidth}px">${p.cards.map(c=>cardHTML(c)).join('')}${declaration?`<span class="declaration-label">${s.trump?symbols[suits.indexOf(s.trump)]+' 主':'无主'} · 已亮牌</span>`:''}</div>`;
+  const largest=winner===p.player;
+  return `<div class="play ${pos} ${declaration?'declaration':''} ${fresh&&p===show[show.length-1]?'fresh':''} ${largest?'winner':''}" style="--play-overlap:${step-cardWidth}px">${p.cards.map(c=>cardHTML(c)).join('')}${largest?`<span class="trick-winner" role="status">${s.trick.length?'当前最大':'本轮最大'}</span>`:''}${declaration?`<span class="declaration-label">${s.trump?symbols[suits.indexOf(s.trump)]+' 主':'无主'} · 已亮牌</span>`:''}</div>`;
  }).join('');
  previousPlay=current;
+}
+function clearPlayNotices(){
+ for(const timer of playNoticeTimers.values())clearTimeout(timer);
+ playNoticeTimers.clear();playNotices.clear();playNoticeScope='';
+}
+function notifyPlays(previous){
+ const s=snap.state;
+ const number=s?.trick?.length?s.trick_no+1:s?.last_trick?.number;
+ const scope=s&&['playing','round_end','match_end'].includes(s.phase)?`${snap.room}|${s.round}|${s.redeals}|${number}`:'';
+ if(scope!==playNoticeScope){clearPlayNotices();playNoticeScope=scope;}
+ if(!scope||!previous?.state||previous.room!==snap.room||previous.state.round!==s.round||previous.state.redeals!==s.redeals)return;
+ const before=previous.state.public_history||previous.state.events||[];
+ const seen=Math.max(-1,...before.map(e=>e.seq));
+ for(const e of s.public_history||s.events||[]){
+  if(e.type!=='play'||e.seq<=seen||e.trick_number!==number)continue;
+  const notices=(e.notices||[]).filter(n=>Object.hasOwn(playNoticeLabels,n));
+  if(!notices.length)continue;
+  playNotices.set(e.player,notices);
+  clearTimeout(playNoticeTimers.get(e.player));
+  const timer=setTimeout(()=>{if(playNoticeScope!==scope||playNoticeTimers.get(e.player)!==timer)return;playNotices.delete(e.player);playNoticeTimers.delete(e.player);if(snap?.state)renderPlayers();},2800);
+  playNoticeTimers.set(e.player,timer);
+ }
 }
 function notifyBids(previous){
  const s=snap.state;
@@ -267,6 +296,7 @@ function acceptSnapshot(data){
  if(previous?.room!==data.room){tentativeSeat=null;roomManagerOpen=false;}
  snap=data;mode=snap.mode;
  notifyBids(previous);
+ notifyPlays(previous);
  $('table').classList.toggle('self-view',mode==='self');
  $('setupOverlay').hidden=true;$('leaveButton').hidden=false;
  $('inviteButton').hidden=mode!=='pvp';
@@ -300,7 +330,9 @@ function acceptSnapshot(data){
  $('roomInfo').textContent=mode==='pvp'?`房间 ${snap.room} · 你在 ${snap.seat} 座`:mode==='self'?'教学牌桌 · 可操作四家':`你在 ${snap.seat} 座 · ${snap.seat%2?'金队':'青队'}`;
  const phaseText={dealing:'摸牌与亮主',burying:'拿底 · 扣八张',final_bidding:'拿底前确认主牌',countering:'扣底后反底',playing:'出牌阶段',round_end:'本局结算',match_end:'比赛结束'};
  $('phaseLabel').textContent=snap.paused?(snap.pause_reason==='policy_error'?'自动策略异常 · 已暂停':'牌桌已暂停 · 等待重连'):dealingComplete()?'摸牌结束 · 实时亮主':phaseText[s.phase];
- $('tableHint').textContent=s.phase==='dealing'?`已发 ${s.deal_count} / 100 张`:`第 ${s.trick_no+(['round_end','match_end'].includes(s.phase)?0:1)} 轮 · 打 ${label(s.level)}`;
+ const completedTrick=s.phase==='playing'&&!s.trick.length&&s.last_trick;
+ const displayedTrick=completedTrick?s.last_trick.number:s.trick_no+(['round_end','match_end'].includes(s.phase)?0:1);
+ $('tableHint').textContent=s.phase==='dealing'?`已发 ${s.deal_count} / 100 张`:`第 ${displayedTrick} 轮${completedTrick?'已结算':''} · 打 ${label(s.level)}`;
  $('trickCount').textContent=s.trick_no+' 轮';
  $('tableStatus').textContent=snap.paused?(snap.pause_reason==='policy_error'?'自动策略已暂停，请检查服务端日志':'有玩家离线，原座位保留，重连后继续'):s.phase==='playing'?(s.trick.length?`${nameOf(s.current_player)} 须跟 ${s.trick[0].cards.length} 张`:`${nameOf(s.current_player)} 领出`):s.phase==='burying'?`${nameOf(s.current_player)} 选择八张扣底`:s.phase==='final_bidding'?`${nameOf(s.current_player)} 是否反主或加固？`:s.phase==='countering'?`${nameOf(s.current_player)} 是否反底？`:s.phase==='dealing'?`${nameOf(s.current_player)} 摸牌 · 可亮主`:'本局已结束';
  $('turnHint').textContent=['round_end','match_end'].includes(s.phase)?(snap.settlement?.confirmed?'本局结束 · 点击阶段标签查看结算':'本局结束 · 先核对底牌和计分'):isTakeover()?`${snap.ai?.name||'AI'} 正在托管你的座位 · 可随时取消`:dealingComplete()?'所有牌已摸完 · 六秒内仍可亮主 / 反主':snap.autoplay?(mode==='pve'?`${snap.ai?.name||'AI'}托管中，可随时暂停`:'随机策略托管中，可随时暂停'):canBidNow()?`${nameOf(s.current_player)} 正在摸牌 · 你可随时亮主 / 反主`:snap.bot_thinking?`${nameOf(s.current_player)} 正在思考…`:isMyTurn()?`${nameOf(s.current_player)} 行动 · Enter 提交`:`等待 ${nameOf(s.current_player)} 行动`;
@@ -387,6 +419,7 @@ async function poll(generation){
  }
 }
 function resetUI(){
+ clearPlayNotices();
  pollGeneration++;validationTicket++;token=null;sessionStorage.removeItem('tractor_session');snap=null;selected.clear();busy=false;$('passButton').disabled=false;autoDeal=false;clearTimeout(autoTimer);autoTimer=null;autoDrawKey='';autoDrawDue=0;
  clearTimeout(biddingTimer);biddingEndAt=0;
  handKey='';selectionScopeKey='';forcedSelectionKey='';closedResult=null;previousHands=[new Set(),new Set(),new Set(),new Set()];previousPlay='';

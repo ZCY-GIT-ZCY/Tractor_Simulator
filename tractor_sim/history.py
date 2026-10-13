@@ -31,6 +31,7 @@ def now():
 def frame(env, actor=None, action=None, events=(), elapsed=0):
     state = copy.deepcopy({key: getattr(env, key) for key in FIELDS})
     state.update(round=env.round_no, kitty=env.kitty[:] if env.kitty_public else None,
+                 trick_winner=env._trick_winner() if len(env.trick) >= 2 else None,
                  drawn_card=env.deck[env.deal_count - 1] if env.phase == "dealing" else None)
     if env.phase == "dealing" and env.auction and not env.bid:
         state["banker"] = None

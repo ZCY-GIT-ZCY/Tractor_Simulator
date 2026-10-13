@@ -165,11 +165,6 @@ class GatewayHandler(BaseHTTPRequestHandler):
     def forward(self):
         path = unquote(urlparse(self.path).path)
         try:
-            if path == '/api/health':
-                health = self.server.health()
-                self.reply(200 if health['ok'] else 503, health); return
-            if path.startswith('/api/internal/'):
-                self.reply(404, {'error': 'NOT_FOUND'}); return
             if self.headers.get('Transfer-Encoding'):
                 self.reply(400, {'error': 'REQUEST'}); return
             size = int(self.headers.get('Content-Length', '0'))
@@ -178,6 +173,13 @@ class GatewayHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(size) if size else None
             if body is not None and len(body) != size:
                 self.reply(400, {'error': 'REQUEST'}); return
+            # Consume a bounded POST body before closing a rejected request.
+            # Otherwise Windows may reset the socket before the 404 is read.
+            if path == '/api/health':
+                health = self.server.health()
+                self.reply(200 if health['ok'] else 503, health); return
+            if path.startswith('/api/internal/'):
+                self.reply(404, {'error': 'NOT_FOUND'}); return
             worker = self.server.acquire_worker()
             try:
                 conn = http.client.HTTPConnection('127.0.0.1', worker.port, timeout=15)

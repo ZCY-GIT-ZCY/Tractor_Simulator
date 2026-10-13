@@ -1,0 +1,19 @@
+/* Public referee signals, anchored to the actor and winning play. */
+.play.winner::after { content:none; }
+.play.winner .card { border-color:#ddc57f; box-shadow:0 0 0 1px #ddc57f88,0 3px 9px #0002; }
+.trick-winner { position:absolute; top:calc(100% + 7px); left:50%; transform:translateX(-50%); padding:4px 10px; border:1px solid #dfc58099; border-radius:20px; background:#132f29ed; color:#f3d993; font-size:10px; font-weight:600; white-space:nowrap; box-shadow:0 3px 8px #0002; pointer-events:none; }
+.trick-winner::before { content:'◆'; margin-right:5px; font-size:8px; }
+.play.south .trick-winner { top:auto; bottom:calc(100% + 7px); }
+.play-notices { position:absolute; top:-31px; left:50%; transform:translateX(-50%); display:flex; gap:4px; z-index:5; pointer-events:none; white-space:nowrap; animation:notice-arrive .2s ease-out; }
+.play-notice { padding:5px 10px; border:1px solid #f5e0aa75; border-radius:7px; background:#f3e5be; color:#284c3c; box-shadow:0 4px 12px #102b2650; font-size:11px; font-weight:650; }
+.play-notice.ruff,.play-notice.overruff { background:#eed0c4; color:#77443b; border-color:#f5d4c188; }
+.play-notice.trump_lead { background:#d8e7d9; color:#285242; border-color:#e2f0df88; }
+.seat.north .play-notices,.seat.south .play-notices { top:0; left:calc(50% + 83px); transform:none; flex-direction:column; }
+@keyframes notice-arrive { from { opacity:0; margin-top:5px; } to { opacity:1; margin-top:0; } }
+@media(max-width:760px) {
+ .play-notice { padding:4px 7px; font-size:10px; }
+ .seat.north .play-notices,.seat.south .play-notices { left:calc(50% + 62px); }
+ .trick-winner { padding:3px 7px; font-size:9px; top:calc(100% + 5px); }
+ .play.south .trick-winner { top:auto; bottom:calc(100% + 5px); }
+}
+@media(prefers-reduced-motion:reduce) { .play-notices { animation:none; } }

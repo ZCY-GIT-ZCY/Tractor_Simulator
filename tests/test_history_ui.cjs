@@ -35,6 +35,16 @@ function fixture(id='a'.repeat(32),level=11){
  return {meta,frames};
 }
 const flush=()=>new Promise(setImmediate);
+
+test('replay displays referee winner and the actor notice on a partial trick',()=>{
+ const p=page(),data=fixture(),state={...data.frames[0].state,phase:'playing',trick_no:0,
+  trick:[{player:0,cards:[7]},{player:3,cards:[19]}],trick_winner:3};
+ p.context.fixture={state,actor:3,events:[{type:'play',player:3,notices:['ruff']}]};
+ p.context.meta=data.meta;p.run('record={meta};renderTable(fixture)');
+ assert.match(p.element('replayPlays').innerHTML,/play east[^\"]*winner/);
+ assert.match(p.element('replayPlays').innerHTML,/当前最大/);
+ assert.match(p.element('replayPlayers').innerHTML,/杀牌/);
+});
 async function load(p,data=fixture()){
  p.requests.find(r=>r.url==='/api/history').reply({records:[data.meta]});await flush();
  p.requests.find(r=>r.url==='/api/history/'+data.meta.id).reply(data);await flush();
