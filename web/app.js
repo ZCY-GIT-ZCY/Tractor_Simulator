@@ -265,7 +265,7 @@ function eventText(e){
  }}
 function renderFeed(){
  const s=snap.state,all=new Map();
- for(const e of [...(snap.record_plays?s.public_history||[]:[]),...s.events])if(eventText(e))all.set(e.seq,e);
+ for(const e of [...(snap.record_plays?s.public_history||[]:[]),...s.events])if(e.round===s.round&&eventText(e))all.set(e.seq,e);
  const chronological=[...all.values()].sort((a,b)=>a.seq-b.seq);
  const events=(snap.record_plays?chronological:chronological.slice(-22)).reverse();
  const scope=`${snap.room}|${s.round}|${s.redeals}|${!!snap.record_plays}`;

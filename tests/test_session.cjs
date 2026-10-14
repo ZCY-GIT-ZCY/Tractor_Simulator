@@ -432,12 +432,38 @@ test('only the receiving hand marks the eight exact bottom cards, and burial cle
 
 test('recorded feed retains plays beyond the recent event window, escapes names and toggles off cleanly',()=>{
  const b=browser(),data=playingSnapshot();data.players[0].name='<script>名字</script>';
- data.record_plays=true;data.state.public_history=Array.from({length:90},(_,i)=>({seq:i+1,type:'play',player:0,cards:[i%52],trick_number:Math.floor(i/4)+1}));
+ data.record_plays=true;data.state.public_history=Array.from({length:90},(_,i)=>({seq:i+1,round:1,type:'play',player:0,cards:[i%52],trick_number:Math.floor(i/4)+1}));
  data.state.events=data.state.public_history.slice(-3);sit(b,data);
  assert.equal((b.element('eventFeed').innerHTML.match(/打出了/g)||[]).length,90);
  assert.match(b.element('eventFeed').innerHTML,/♠-2/);assert.doesNotMatch(b.element('eventFeed').innerHTML,/<script>/);
  data.record_plays=false;data.version++;b.context.fixture=data;b.run('acceptSnapshot(fixture)');
  assert.doesNotMatch(b.element('eventFeed').innerHTML,/打出了/);
+});
+
+test('a new hand clears the previous hand from the feed even when recent events still contain it',()=>{
+ for(const record of [true,false]){
+  const b=browser(),data=playingSnapshot();data.record_plays=record;
+  const oldPlay={seq:101,round:1,type:'play',player:0,cards:[4],trick_number:1};
+  const oldTrick={seq:102,round:1,type:'trick_ended',winner:0,number:1,points:5};
+  data.state.public_history=[oldPlay];data.state.events=[oldPlay,oldTrick];sit(b,data);
+  assert.match(b.element('eventFeed').innerHTML,/data-event-seq="102"/);
+  assert.equal(b.element('eventFeed').innerHTML.includes('打出了'),record);
+  b.element('eventFeed').scrollTop=200;
+  data.version++;data.state.round=2;data.state.phase='dealing';data.state.public_history=[];
+  data.state.events.push({seq:103,round:2,type:'round_started',level:3});
+  b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+  assert.doesNotMatch(b.element('eventFeed').innerHTML,/data-event-seq="10[12]"|打出了/);
+  assert.match(b.element('eventFeed').innerHTML,/第 2 局/);
+  assert.equal(b.element('eventFeed').scrollTop,0);
+  const currentPlay={seq:104,round:2,type:'play',player:1,cards:[17],trick_number:1};
+  data.version++;data.state.phase='playing';data.state.public_history=[currentPlay];
+  data.state.events.push(currentPlay,{seq:105,round:2,type:'trick_ended',winner:1,number:1,points:5});
+  b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+  const html=b.element('eventFeed').innerHTML;
+  assert.doesNotMatch(html,/data-event-seq="10[12]"/);
+  assert.match(html,/data-event-seq="105"/);
+  assert.equal(html.includes('data-event-seq="104"'),record);
+ }
 });
 
 test('record setting is shown only to the host and a failed request restores the checkbox',async()=>{
