@@ -70,7 +70,7 @@ class TableReviewTests(unittest.TestCase):
             room.confirm_result(token)
             self.assertEqual(room.snapshot(token)['settlement']['confirmed_by'], 2)
 
-    def test_ai_banker_waits_then_dispatcher_confirms_without_an_engine_action(self):
+    def test_ai_banker_waits_for_human_confirmation_even_after_timer_then_starts_next_hand(self):
         registry = Registry(policy_factory=RandomPolicy)
         room = Room('ai_review', 'pve', GameConfig(auction=False, banker=2), 18, RandomPolicy)
         token = room.join('Human', 0)
@@ -81,6 +81,7 @@ class TableReviewTests(unittest.TestCase):
             review = room.snapshot(token)['settlement']
             self.assertTrue(review['ai_banker'])
             self.assertFalse(review['confirmed'])
+            self.assertTrue(review['can_confirm'])
             self.assertGreater(review['ai_confirm_seconds'], AI_REVIEW_SECONDS - 1)
         worker = threading.Thread(target=registry.run_bots, daemon=True)
         worker.start()
@@ -89,11 +90,12 @@ class TableReviewTests(unittest.TestCase):
             with room.condition:
                 self.assertIsNone(room.review_confirmed_by)
                 room.review_started -= AI_REVIEW_SECONDS
-            deadline = time.monotonic() + 2
-            while room.review_confirmed_by is None and time.monotonic() < deadline:
-                time.sleep(.02)
-            self.assertEqual(room.review_confirmed_by, 2)
-            self.assertEqual(room.env.export_state(), before)
+                self.assertFalse(room.finish_ai_review())
+                self.assertEqual(room.env.export_state(), before)
+                old_round=room.env.round_no
+                room.confirm_result(token, old_round)
+                self.assertEqual(room.env.round_no, old_round+1)
+                self.assertEqual(room.env.phase, 'dealing')
         finally:
             registry.stopped.set(); worker.join(2)
 

@@ -445,6 +445,8 @@ class TractorEnv:
                "hand_counts": list(map(len, self.hands)), "kitty": self.kitty[:] if self.kitty_public else None,
                "kitty_public": self.kitty_public, "kitty_owner": self.kitty_owner,
                "known_kitties": copy.deepcopy(self.known_kitties[player]), "deal_count": self.deal_count,
+               "received_kitty": self.known_kitties[player][-1][:] if self.phase == 'burying' and self.current_player == player
+                   and self.known_kitties[player] else [],
                "counter_players": self.counter_queue[:],
                "final_bid_players": self.final_bid_queue[:],
                "drawn_card": self.deck[self.deal_count - 1] if self.phase == "dealing" and player == self.current_player else None,

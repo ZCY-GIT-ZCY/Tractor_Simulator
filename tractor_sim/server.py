@@ -27,6 +27,7 @@ WEB = ROOT / "web"
 DISCONNECT_SECONDS = 25
 ROOM_IDLE_SECONDS = 2 * 60 * 60
 AI_REVIEW_SECONDS = 6
+AI_TRICK_REVIEW_SECONDS = 2
 BIDDING_GRACE_SECONDS = 6
 ROOM_MEMBER_LIMIT = 16
 
@@ -42,6 +43,10 @@ class Room:
         self.review_round = None
         self.review_started = None
         self.review_confirmed_by = None
+        self.review_confirmations = []
+        self.review_ai_banker = False
+        self.trick_review_until = None
+        self.record_plays = False
         factory = policy_factory or (EnochPolicy if mode in ("pve", "pvp") else RandomPolicy)
         # Separate instances ensure future policy memory cannot mix private seats.
         seat_rng = random.Random(seed)
@@ -116,12 +121,22 @@ class Room:
                 raise IllegalAction('BIDDING_CLOSED', '六秒实时亮主已结束，请按后续轮询行动')
         actor = self.env.current_player if player is None else player
         old_round = self.env.round_no
+        old_trick = self.env.trick_no
         transition = self.env.step(action, actor)
         self.sync_bidding_window(now)
         if self.env.round_no != old_round:
             self.review_round = self.review_started = self.review_confirmed_by = None
+            self.review_confirmations = []
+            self.review_ai_banker = False
+            self.trick_review_until = None
         elif self.env.phase in ("round_end", "match_end"):
             self._ensure_review()
+            self.trick_review_until = None
+        elif self.env.phase == 'playing':
+            if self.env.trick_no != old_trick:
+                self.trick_review_until = now + AI_TRICK_REVIEW_SECONDS
+            elif self.env.trick:
+                self.trick_review_until = None
         if self.history:
             if self.env.round_no != old_round:
                 self.recording = RoundRecording(self.env)
@@ -168,31 +183,96 @@ class Room:
             self.review_round = result["round"]
             self.review_started = time.monotonic()
             self.review_confirmed_by = None
+            self.review_confirmations = []
+            self.review_ai_banker = self.is_bot(result['banker'])
+
+    def review_humans(self):
+        return {token: client for token, client in self.clients.items() if client['seat'] is not None}
+
+    def ai_review(self):
+        # Replacing an AI between hands does not change who actually played
+        # banker. A departing human banker can instead hand review to the AI.
+        return self.review_ai_banker or self.is_bot(self.env.result['banker'])
 
     def settlement(self, client):
         if self.env.phase not in ("round_end", "match_end") or not self.env.result:
             return None
         self._ensure_review()
         banker = self.env.result["banker"]
-        ai_banker = self.is_bot(banker)
+        ai_banker = self.ai_review()
+        humans = self.review_humans()
+        acknowledgments = [{"seat": c['seat'], "name": c['name'],
+                            "confirmed": token in self.review_confirmations}
+                           for token, c in humans.items()]
+        own_confirmed = any(c is client and token in self.review_confirmations for token, c in humans.items())
         return {"round": self.review_round, "banker": banker,
                 "kitty": self.env.kitty[:], "kitty_points": sum(points(c) for c in self.env.kitty),
                 "confirmed": self.review_confirmed_by is not None,
                 "confirmed_by": self.review_confirmed_by,
-                "can_confirm": self.mode == "self" or client["seat"] == banker,
+                "can_confirm": (client['seat'] is not None and (ai_banker or self.mode == "self" or client["seat"] == banker))
+                    and not own_confirmed and self.review_confirmed_by is None,
+                "own_confirmed": own_confirmed,
+                "humans": acknowledgments,
+                "pending_humans": [a for a in acknowledgments if not a['confirmed']],
                 "ai_banker": ai_banker,
                 "ai_confirm_seconds": max(0, AI_REVIEW_SECONDS - (time.monotonic() - self.review_started)) if ai_banker else None}
 
-    def confirm_result(self, token):
+    def confirm_result(self, token, round_no=None):
         client = self.check(token)
         review = self.settlement(client)
+        if round_no is not None and (review is None or round_no != review['round']):
+            raise IllegalAction('REVIEW_STALE', '确认对应的牌局已结束，请核对当前牌桌')
         if review is None:
             raise IllegalAction("PHASE", "本局尚未结束")
+        if review['confirmed'] or token in self.review_confirmations:
+            return
         if not review["can_confirm"]:
             raise IllegalAction("BANKER_ONLY", "请由本局坐庄的玩家确认底牌和计分")
         if not review["confirmed"]:
-            self.review_confirmed_by = review["banker"]
+            self.review_confirmations.append(token)
+            if review['ai_banker']:
+                self.finish_ai_review()
+            else:
+                self.review_confirmed_by = review["banker"]
             self.bump()
+
+    def finish_ai_review(self):
+        if self.env.phase not in ('round_end', 'match_end') or not self.env.result:
+            return False
+        self._ensure_review()
+        if not self.ai_review():
+            return False
+        humans = self.review_humans()
+        if any(t not in self.review_confirmations for t in humans):
+            return False
+        # An empty room must not start an endless stream of autonomous hands.
+        if not humans and time.monotonic() - self.review_started < AI_REVIEW_SECONDS:
+            return False
+        if humans and self.env.phase == 'round_end' and self.paused:
+            return False
+        changed = self.review_confirmed_by is None
+        self.review_confirmed_by = self.env.result['banker']
+        if humans and self.env.phase == 'round_end' and not self.paused:
+            self.step({'type': 'next_round'})
+            self.next_bot_at = time.monotonic() + 0.55
+            changed = True
+        return changed
+
+    def set_record_plays(self, token, enabled):
+        self.check(token)
+        if token != self.host:
+            raise IllegalAction('HOST_ONLY', '请由房主决定是否在牌局动态中记牌')
+        if type(enabled) is not bool:
+            raise ValueError('enabled 须为布尔值')
+        if self.record_plays != enabled:
+            self.record_plays = enabled
+            self.bump()
+
+    def trick_review_remaining(self, now=None):
+        if (self.trick_review_until is None or self.env.phase != 'playing' or self.env.trick
+                or not self.policy_controls(self.env.current_player)):
+            return 0
+        return max(0, self.trick_review_until - (time.monotonic() if now is None else now))
 
     def join(self, name, seat=None):
         with self.condition:
@@ -248,6 +328,7 @@ class Room:
             self.elect_host()
         self.next_bot_at = time.monotonic() + 0.15
         self.refresh_pause()
+        self.finish_ai_review()
         self.bump()
 
     def occupied_seats(self):
@@ -422,6 +503,7 @@ class Room:
         observer = self.env.current_player if self.mode == "self" else client["seat"]
         obs = self.env.observe(observer, omniscient=self.mode == "self") if self.started and observer is not None else None
         if obs is not None:
+            obs['trick_review_seconds'] = self.trick_review_remaining()
             obs['bidding_window'] = {'complete': self.bidding_deadline is not None,
                 'remaining_seconds': max(0, self.bidding_deadline - (self.bidding_paused_at if self.bidding_paused_at is not None else time.monotonic()))
                     if self.bidding_deadline is not None else 0,
@@ -444,6 +526,7 @@ class Room:
                 "bot_thinking": self.pending is not None,
                 "replay_id": self.replay_id, "history_error": self.history_error,
                 "settlement": self.settlement(client),
+                "record_plays": self.record_plays, "can_set_record_plays": token == self.host,
                 "pause_reason": "policy_error" if self.policy_error else "disconnected" if self.paused else None,
                 "config": asdict(self.config), "state": obs}
 
@@ -646,14 +729,14 @@ class Registry:
                     if not room.clients and (room.mode != 'pvp' or len(room.ai_seats) != 4):
                         continue
                     if room.started and room.env.phase in ("round_end", "match_end"):
-                        review = room.settlement(next(iter(room.clients.values()), {'seat': None}))
-                        if review and review["ai_banker"] and not review["confirmed"] and review["ai_confirm_seconds"] <= 0:
-                            room.review_confirmed_by = review["banker"]
+                        if room.finish_ai_review():
                             room.bump()
                         continue
                     if not room.started or room.paused or room.env.phase in ("round_end", "match_end"):
                         continue
                     if now < room.next_bot_at:
+                        continue
+                    if room.trick_review_remaining(room_time):
                         continue
                     actor = self._policy_actor(room)
                     if actor is not None:
@@ -848,6 +931,9 @@ class Handler(BaseHTTPRequestHandler):
                 elif path == "/api/room/start":
                     room.start_room(token)
                     response = room.snapshot(token)
+                elif path == '/api/room/record-plays':
+                    room.set_record_plays(token, data.get('enabled'))
+                    response = room.snapshot(token)
                 elif path in ('/api/action', '/api/bid'):
                     realtime_bid = path == '/api/bid'
                     if realtime_bid:
@@ -876,9 +962,11 @@ class Handler(BaseHTTPRequestHandler):
                     room.next_bot_at = time.monotonic() + 0.55
                     response = room.snapshot(token)
                 elif path == "/api/confirm-result":
-                    if data.get("version") != room.version:
+                    if 'round' not in data and data.get("version") != room.version:
                         self.json_response({"error": "STALE", "message": "对局已更新，请重试"}, 409); return
-                    room.confirm_result(token)
+                    if 'round' in data and type(data['round']) is not int:
+                        raise ValueError('round 须为整数')
+                    room.confirm_result(token, data.get('round'))
                     response = room.snapshot(token)
                 elif path == "/api/autoplay":
                     if room.mode == "pvp":

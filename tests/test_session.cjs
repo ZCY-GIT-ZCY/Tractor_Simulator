@@ -29,6 +29,7 @@ function browser(initialToken = null, saved = null) {
   addEventListener:(event,fn)=>listeners.set(event,fn)}, sessionStorage,localStorage,
   location:{search:'',origin:'http://127.0.0.1:8765',hostname:'127.0.0.1'},
   window:{addEventListener:(event,fn)=>listeners.set('window:'+event,fn)}, navigator:{}, innerWidth:1280,
+  getComputedStyle(){return {getPropertyValue:key=>({'--table-scale':'1.6','--table-card-base-width':context.innerWidth<=760?'32px':'44px'}[key]??'')};},
   URL,URLSearchParams,AbortController, setTimeout(fn,delay){const id=++timerId;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);},
   TractorHandOrder:{sort:cards=>cards.slice()},TractorDrawPreview:require('../web/draw-preview.js'),TractorHandLayout:require('../web/hand-layout.js'),
   fetch(url,options){
@@ -59,6 +60,42 @@ function sit(browser,data=snapshot()) {
  browser.run('token=fixture.token;acceptSnapshot(fixture);rememberSeat()');
 }
 function latest(browser,path){return browser.requests.findLast(r=>r.url===path);}
+
+test('only the latest own drawn physical card is highlighted; it persists until the next own draw',()=>{
+ const b=browser(),data=snapshot();
+ data.state.hand=[0,54];data.state.drawn_card=0;data.state.deal_count=5;
+ sit(b,data);
+ assert.equal((b.element('hand').innerHTML.match(/draw-received/g)||[]).length,1);
+ assert.match(b.element('hand').innerHTML,/draw-received[^>]*data-card="0"/);
+ assert.doesNotMatch(b.element('hand').innerHTML,/draw-received[^>]*data-card="54"/);
+ b.run('selected.add(54)');data.version++;b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.match(b.element('hand').innerHTML,/draw-received[^>]*data-card="0"/);
+ assert.equal(b.get('selected.has(54)'),true);
+ data.version++;data.state.current_player=3;data.state.deal_count=6;data.state.drawn_card=null;
+ b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.match(b.element('hand').innerHTML,/draw-received[^>]*data-card="0"/);
+ data.version++;data.state.current_player=0;data.state.deal_count=9;
+ data.state.hand.push(3);data.state.drawn_card=3;b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.equal((b.element('hand').innerHTML.match(/draw-received/g)||[]).length,1);
+ assert.match(b.element('hand').innerHTML,/draw-received[^>]*data-card="3"/);
+ assert.doesNotMatch(b.element('hand').innerHTML,/draw-received[^>]*data-card="0"/);
+ data.version++;data.state.phase='final_bidding';b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.doesNotMatch(b.element('hand').innerHTML,/draw-received/);
+});
+
+test('new hand, redeal and teaching seat changes do not keep a previous draw highlight',()=>{
+ const b=browser(),data=snapshot();data.state.drawn_card=1;sit(b,data);
+ assert.match(b.element('hand').innerHTML,/draw-received/);
+ data.version++;data.state.redeals=1;data.state.current_player=3;data.state.drawn_card=null;
+ b.context.fixture=data;b.run('acceptSnapshot(fixture)');assert.doesNotMatch(b.element('hand').innerHTML,/draw-received/);
+ data.version++;data.mode='self';data.state.current_player=0;data.state.drawn_card=1;
+ data.state.hands=[[1],[8],[],[]];sit(b,data);
+ assert.match(b.element('hand').innerHTML,/draw-received[^>]*data-card="1"/);
+ data.version++;data.state.current_player=1;data.state.drawn_card=8;data.state.deal_count=2;
+ b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.match(b.element('hand').innerHTML,/draw-received[^>]*data-card="8"/);
+ assert.doesNotMatch(b.element('hand').innerHTML,/draw-received[^>]*data-card="1"/);
+});
 
 test('fixed banker is shown by the nickname immediately while dealing, including seat zero',()=>{
  for(const seat of [0,1,2,3]){
@@ -286,6 +323,57 @@ test('counter replaces earlier shown cards and strengthening has its own notice'
  assert.match(b.element('bidNotice').innerHTML,/无主/);
  assert.match(b.element('playsLayer').innerHTML,/play north declaration/);
  assert.doesNotMatch(b.element('playsLayer').innerHTML,/data-card="13"/);
+});
+
+test('AI banker prompts each human without covering the final trick, then shows their acknowledgment',()=>{
+ const b=browser(),data=ending();
+ data.settlement={...data.settlement,round:1,ai_banker:true,can_confirm:true,own_confirmed:false,
+  humans:[{seat:0,name:'Player 0',confirmed:false},{seat:1,name:'Player 1',confirmed:false}],
+  pending_humans:[{seat:0,name:'Player 0',confirmed:false},{seat:1,name:'Player 1',confirmed:false}]};
+ sit(b,data);assert.equal(b.element('resultOverlay').hidden,true);
+ assert.equal(b.element('confirmResultButton').hidden,false);assert.match(b.element('confirmResultButton').textContent,/我已看完/);
+ assert.match(b.element('settlementWaiting').textContent,/全部确认后自动开始下一局/);
+ data.settlement.own_confirmed=true;data.settlement.can_confirm=false;
+ data.settlement.humans[0].confirmed=true;data.settlement.pending_humans.shift();data.version++;
+ b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.equal(b.element('confirmResultButton').hidden,true);assert.match(b.element('reviewPlayers').innerHTML,/confirmed/);
+ assert.match(b.element('settlementWaiting').textContent,/你已确认/);
+ assert.equal(b.element('settlementPanel').hidden,false);assert.equal(b.element('resultOverlay').hidden,true);
+});
+
+test('only the receiving hand marks the eight exact bottom cards, and burial clears the marks',()=>{
+ const b=browser(),data=snapshot();data.state.phase='burying';data.state.hand=Array.from({length:33},(_,i)=>i);
+ data.state.received_kitty=data.state.hand.slice(25);sit(b,data);
+ assert.equal((b.element('hand').innerHTML.match(/kitty-received/g)||[]).length,8);
+ data.state.phase='countering';data.version++;b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.doesNotMatch(b.element('hand').innerHTML,/kitty-received/);
+});
+
+test('recorded feed retains plays beyond the recent event window, escapes names and toggles off cleanly',()=>{
+ const b=browser(),data=playingSnapshot();data.players[0].name='<script>名字</script>';
+ data.record_plays=true;data.state.public_history=Array.from({length:90},(_,i)=>({seq:i+1,type:'play',player:0,cards:[i%52],trick_number:Math.floor(i/4)+1}));
+ data.state.events=data.state.public_history.slice(-3);sit(b,data);
+ assert.equal((b.element('eventFeed').innerHTML.match(/打出了/g)||[]).length,90);
+ assert.match(b.element('eventFeed').innerHTML,/♠-2/);assert.doesNotMatch(b.element('eventFeed').innerHTML,/<script>/);
+ data.record_plays=false;data.version++;b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.doesNotMatch(b.element('eventFeed').innerHTML,/打出了/);
+});
+
+test('record setting is shown only to the host and a failed request restores the checkbox',async()=>{
+ const b=browser(),data=snapshot();data.can_set_record_plays=true;data.record_plays=false;sit(b,data);
+ assert.equal(b.element('recordPlaysControl').hidden,false);
+ b.element('recordPlaysInput').checked=true;const changing=b.element('recordPlaysInput').onchange();
+ const request=latest(b,'/api/room/record-plays');assert.deepEqual(JSON.parse(request.options.body),{enabled:true});
+ request.reply({message:'网络异常'},500);await changing;assert.equal(b.element('recordPlaysInput').checked,false);
+ data.can_set_record_plays=false;data.version++;b.context.fixture=data;b.run('acceptSnapshot(fixture)');
+ assert.equal(b.element('recordPlaysControl').hidden,true);
+});
+
+test('AI lead review leaves the previous four plays visible and identifies the waiting leader',()=>{
+ const last={number:1,winner:2,plays:[0,3,2,1].map(player=>({player,cards:[player+1]}))};
+ const b=browser(),data=playingSnapshot([],null,[],5,1,last);data.state.current_player=2;data.state.trick_review_seconds=1.9;sit(b,data);
+ assert.equal((b.element('playsLayer').innerHTML.match(/data-card=/g)||[]).length,4);
+ assert.match(b.element('tableStatus').textContent,/上一轮出牌展示中/);
 });
 
 test('unconfirmed result shows eight bottom cards and score panel without a modal',()=>{

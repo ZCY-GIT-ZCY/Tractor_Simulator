@@ -18,9 +18,10 @@ ROOM_FIELDS = (
     'started', 'host', 'autoplay', 'policy_epochs', 'paused', 'policy_error',
     'policy_error_actor', 'version', 'diagnostic_revision', 'updated',
     'next_bot_at', 'bidding_deadline', 'bidding_paused_at', 'ai_name', 'ai_id',
+    'review_confirmations', 'review_ai_banker', 'trick_review_until', 'record_plays',
 )
 CLOCK_FIELDS = ('review_started', 'updated', 'next_bot_at',
-                'bidding_deadline', 'bidding_paused_at')
+                 'bidding_deadline', 'bidding_paused_at', 'trick_review_until')
 
 
 def tuples(value):
@@ -114,7 +115,7 @@ def load_registry(registry, document):
     for state in document['rooms']:
         room = Room(state['code'], state['mode'], GameConfig(**state['config']), history=registry.history)
         for field in ROOM_FIELDS:
-            setattr(room, field, copy.deepcopy(state[field]))
+            setattr(room, field, copy.deepcopy(state.get(field, getattr(room, field))))
         room.env = TractorEnv.from_state(state['env'])
         room.ai_seats = set(state['ai_seats'])
         room.departed_names = {int(k): v for k, v in room.departed_names.items()}

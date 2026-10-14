@@ -32,7 +32,7 @@
 
 `seed` 明确指定才保证初始发牌可复现。策略 RNG 与环境 RNG 独立；同初始 seed、config 和接受动作顺序可以精确重放。`tractor_sim.replay.replay_episode` 校验 CLI JSON 的一个 episode，并返回恢复环境；CLI `--replay` 检查文件全部 episode。
 
-不能把 `export_state()`、`omniscient=True` 或内部 `hands/deck/kitty` 当作 PVE/PVP 策略输入。`kitty` 仅在无人亮主、翻底定主时为牌列表，其他情况为 null，包括自对弈与局末。`result.kitty` 和 round_ended 事件也遵守这一限制。网页在终局单独通过房间快照的 `settlement.kitty` 公布最终底牌，训练策略仍只接收上述引擎观察。`known_kitties` 是该玩家实际拿过、扣过底牌的历史知识，属于私人记忆；反底后其他人扣的新底牌不会泄露。
+不能把 `export_state()`、`omniscient=True` 或内部 `hands/deck/kitty` 当作 PVE/PVP 策略输入。`received_kitty` 只在拿底者扣底阶段返回本次拿到的八张实体牌，用于手牌高亮；其他座位、扣底完成后均为空，不泄露新底牌。`kitty` 仅在无人亮主、翻底定主时为牌列表，其他情况为 null，包括自对弈与局末。`result.kitty` 和 round_ended 事件也遵守这一限制。网页在终局单独通过房间快照的 `settlement.kitty` 公布最终底牌，训练策略仍只接收上述引擎观察。`known_kitties` 是该玩家实际拿过、扣过底牌的历史知识，属于私人记忆；反底后其他人扣的新底牌不会泄露。
 
 ## 阶段与动作
 
@@ -95,7 +95,8 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 | `POST /api/validate` | `{version?,round?,redeals?,context?:{level,trump},action}` | 预校验及 `version/level/trump/round/redeals/phase`；摸牌 bid 必须带 round/redeals，允许旧版本／旧主门，并按最新强度检查；其他动作旧 version 或页面级牌／主门不同返回 409 STALE；不预测甩牌成败 |
 | `POST /api/action` | `{version,action}` | 接受后快照；旧 version 返回 409，不执行 |
 | `POST /api/bid` | `{round,redeals,action:{type:"bid",cards:[...]}}` | 仅摸牌阶段实时亮主／反主；按房间锁串行裁判，不因其他人摸牌而拒绝旧版本；后到的同强／较弱亮法返回 422 BID_TOO_WEAK，提示亮主无效 |
-| `POST /api/confirm-result` | `{version}` | 终局由本局庄家确认底牌和计分；非庄家返回 `BANKER_ONLY`，旧 version 返回 409 |
+| `POST /api/confirm-result` | `{round,version?}` | 真人庄家确认后展示结算；AI 庄家须每位在座真人分别确认，最后一人确认后自动开下一局（整场结束则展示结果）。同局重复确认幂等；旧局返回 `REVIEW_STALE`。候场成员不参与确认 |
+| `POST /api/room/record-plays` | `{enabled:true|false}` | 房主统一开关右侧动态中的逐手记牌，默认关闭；不改变裁判、AI 可知历史或完整回放保存 |
 | `POST /api/autoplay` | `{enabled:true|false}` | self 四家随机托管 / PVE 四家 Enoch 托管；PVP 只开关请求者本人座位的 Enoch AI 托管 |
 | `POST /api/leave` | `{}` | `{ok:true}`，PVP 真人席位自动变为 AI；释放原会话，可安全重试 |
 | `GET /api/health` | 无 | `{ok:true,schema_version:1,service:"tractor_sim",bind_host:监听地址,instance_id:进程随机标识,pve_ai:"enoch-table-v1"}` |
@@ -136,9 +137,13 @@ PVP 新会话只在开局前或 `round_end` 局间接纳，`dealing/final_biddin
 
 ### 网页终局核对
 
-房间快照新增 `settlement`：非终局为 `null`；`round_end` / `match_end` 时包含 `round`、`banker`（本局原坐庄者）、`kitty`（最后一次扣下的八张）、`kitty_points`、`confirmed`、`confirmed_by`、`can_confirm`、`ai_banker`、`ai_confirm_seconds`。其余分数取 `state.result`。确认只是房间展示状态，不执行引擎动作、不产生训练奖励、不增加回放步数。自对弈可代庄家确认，PVE/PVP 的 AI 庄家至少等待六秒后确认；真人庄家必须点击。PVP 所有客户端通过版本更新同步结果。确认前房主请求 `next_round` 返回 `REVIEW_PENDING`；确认后仍只有房主可开下一局。新局清空核对状态。
+房间快照新增 `settlement`：非终局为 `null`；`round_end` / `match_end` 时包含 `round`、`banker`（本局原坐庄者）、`kitty`（最后一次扣下的八张）、`kitty_points`、`confirmed`、`confirmed_by`、`can_confirm`、`ai_banker`。其余分数取 `state.result`。确认本身不产生训练奖励、不增加回放步数。自对弈可代庄家确认；真人庄家确认后展示结算，再由房主开下一局。AI 庄家由每位在座真人分别确认，全部确认且房间恢复连接后自动执行 `next_round`；整场结束则展示最终结果。只有无人房间保留六秒确认等待（`ai_confirm_seconds`），且不会自动继续开局。确认前房主请求 `next_round` 返回 `REVIEW_PENDING`。PVP 所有客户端通过版本更新同步进度，新局清空核对状态。
 
 
 ### 必打记录与升级阻挡
 
 `passed_levels[team]` 只在该队作为庄家方打完相应等级的一局时登记，胜负均算，记录不因特殊降级而清除；配置初始等级不会自动登记较低级。升级检查包含当前等级本身：未坐庄打过 2 的闲家即使得 120/160/200 分上台，也先在 2 坐庄，不能升至 3/4/5。`result.upgrade` 是分数对应的名义升级数，实际等级以 `levels_after` 为准；新增 `result.mandatory_stop` 表示实际被哪个未完成的必打级阻挡，无阻挡时为 null。
+
+在线房间在一轮结算后，为 AI 领出保留至少两秒展示上一轮；真人领出无需等待。`state.trick_review_seconds` 返回尚余时间，纯仿真引擎不引入墙钟等待。房间快照 `record_plays/can_set_record_plays` 控制记牌显示；开启时从完整 `public_history` 展示每次实际出牌，支持滚动读取，关闭后恢复原有动态。结算 `humans/pending_humans/own_confirmed` 提供逐人确认进度；旁观候场者不参与，在座真人主动离开后移除其确认要求。无人房间不会自动连续开局。
+
+摸牌阶段通过私有 `drawn_card` 在手牌内高亮最新摸到的实体牌，不再使用独立预览区。高亮保留至该玩家下次摸牌后替换；摸牌阶段结束、重新发牌或切换教学座位时清除。与拿底后的八张牌共用金色高亮样式，不影响预选或选牌状态。

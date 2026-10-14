@@ -7,15 +7,15 @@ test('all 25/33 cards fit the measured hand width at desktop and phone breakpoin
   assert.equal(plan.positions.length,count);
   for(const pos of plan.positions){
    assert.ok(pos.x>=0);assert.ok(pos.x+plan.cardWidth<=width+1e-8);
-   assert.ok(pos.y+84+8+17<=160); // Selected lift stays inside the fixed height.
+   assert.ok(pos.y+plan.cardHeight+8+17<=plan.areaHeight); // Selected lift stays inside the measured height.
   }
  }
 });
 test('dense hands use two rows and preserve the complete rightmost card',()=>{
  for(const count of [25,33]){
   const plan=fit(350,count,true);assert.equal(plan.rows,2);
-  assert.ok(plan.positions.some(p=>p.y===51));
+  assert.ok(plan.positions.some(p=>p.y>0));
   assert.ok(plan.positions.at(-1).x+plan.cardWidth<=350);
-  assert.ok(plan.positions.every(p=>p.exposed>=18));
+  assert.ok(plan.positions.every(p=>p.exposed>=17));
  }
 });

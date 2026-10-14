@@ -173,7 +173,7 @@ class SeatingAPI(unittest.TestCase):
         _, state = self.request('/api/state', token=host['token'])
         self.assertNotIn('hands', state['state']); self.assertIsNone(state['state']['kitty'])
 
-    def test_pvp_ai_banker_confirms_terminal_review(self):
+    def test_pvp_ai_banker_requires_human_ack_then_starts_next_round(self):
         host = self.enter(banker=0)
         self.confirm(host, 1)
         self.request('/api/room/ai', {'enabled': True}, host['token'])
@@ -189,9 +189,12 @@ class SeatingAPI(unittest.TestCase):
             review = room.snapshot(host['token'])['settlement']
             self.assertTrue(review['ai_banker']); self.assertFalse(review['confirmed'])
             room.review_started -= AI_REVIEW_SECONDS
-        deadline = time.monotonic() + 2
-        while room.review_confirmed_by is None and time.monotonic() < deadline: time.sleep(.02)
-        self.assertEqual(room.review_confirmed_by, 0)
+        with room.condition:
+            self.assertFalse(room.finish_ai_review())
+            self.assertIsNone(room.review_confirmed_by)
+        status,state=self.request('/api/confirm-result',{'round':review['round']},host['token'])
+        self.assertEqual(status,200)
+        self.assertEqual(state['state']['round'],2)
 
     def test_default_pvp_bots_are_separate_enoch_policies(self):
         room = Room('default', 'pvp', GameConfig())
@@ -246,7 +249,16 @@ class SeatingAPI(unittest.TestCase):
         _, state = self.request('/api/state', token=host['token'])
         status, next_hand = self.request('/api/action', {'version': state['version'],
             'action': {'type': 'next_round'}}, host['token'])
-        self.assertEqual(status, 200)
+        self.assertEqual(status,422)
+        self.assertEqual(next_hand['code'],'REVIEW_PENDING')
+        # A same-round acknowledgment survives concurrent peer version bumps;
+        # the final one advances the hand exactly once.
+        def acknowledge(client):
+            return self.request('/api/confirm-result',{'round':1,'version':state['version']},client['token'])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses=list(pool.map(acknowledge,(host,new)))
+        self.assertEqual([status for status,_ in responses],[200,200])
+        _,next_hand=self.request('/api/state',token=host['token'])
         self.assertEqual(next_hand['state']['round'], 2)
         self.assertFalse(next_hand['seat_selection_open'])
         self.assertEqual(next_hand['players'][2]['name'], 'New')
@@ -278,7 +290,7 @@ class SeatingAPI(unittest.TestCase):
         status, error = self.request('/api/seat/confirm', {'seat': 1}, pending['token'])
         self.assertEqual((status, error['code']), (422, 'SEAT_TAKEN'))
 
-    def test_host_departure_prefers_seated_human_and_banker_departure_confirms_via_ai(self):
+    def test_host_departure_prefers_seated_human_and_remaining_human_reviews_ai_banker(self):
         host, waiter, peer = self.enter(), self.enter('Waiter'), self.enter('Peer')
         self.confirm(host, 3); self.confirm(peer, 1)
         self.request('/api/room/ai', {'enabled': True}, host['token'])
@@ -290,9 +302,11 @@ class SeatingAPI(unittest.TestCase):
         self.assertTrue(state['host']); self.assertTrue(state['players'][3]['bot'])
         self.assertTrue(state['settlement']['ai_banker'])
         with room.condition: room.review_started -= AI_REVIEW_SECONDS
-        deadline = time.monotonic() + 2
-        while room.review_confirmed_by is None and time.monotonic() < deadline: time.sleep(.02)
-        self.assertEqual(room.review_confirmed_by, 3)
+        with room.condition:
+            self.assertFalse(room.finish_ai_review())
+        status,next_hand=self.request('/api/confirm-result',{'round':state['settlement']['round']},peer['token'])
+        self.assertEqual(status,200)
+        self.assertEqual(next_hand['state']['round'],2)
 
 
 if __name__ == '__main__': unittest.main()

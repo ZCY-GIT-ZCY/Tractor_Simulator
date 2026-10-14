@@ -68,6 +68,26 @@ class Checkpoints(unittest.TestCase):
         self.assertEqual(room.policy.rng.random(), other.policy.rng.random())
         self.assertEqual(room.env.rng.random(), other.env.rng.random())
 
+    def test_ai_review_acknowledgments_and_record_setting_survive_worker_replacement(self):
+        from test_table_review import TableReviewTests
+        room=Room('reviewlive','pvp',GameConfig(auction=False,banker=2),18,history=self.registry.history)
+        self.registry.rooms[room.code]=room
+        tokens=[room.join('玩家'+str(i)) for i in range(2)]
+        with room.condition:
+            for seat,token in enumerate(tokens):
+                room.confirm_seat(token,seat);self.registry.tokens[token]=room
+            room.set_ai(tokens[0],None,True);room.start_room(tokens[0])
+            TableReviewTests.finish(self,room)
+            room.set_record_plays(tokens[0],True);room.confirm_result(tokens[0],1)
+        restored=self.roundtrip();other=restored.lookup(tokens[1]);restored.resume()
+        with other.condition:
+            review=other.snapshot(tokens[1])['settlement']
+            self.assertEqual([p['seat'] for p in review['pending_humans']],[1])
+            self.assertTrue(other.snapshot(tokens[0])['settlement']['own_confirmed'])
+            other.confirm_result(tokens[1],1)
+            self.assertEqual(other.env.round_no,2)
+            self.assertTrue(other.record_plays)
+
     def test_bidding_timer_disconnect_clock_and_replay_exclude_update_pause(self):
         room = self.new_room(mode='self')
         token = room.join('test', 0)

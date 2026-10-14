@@ -1,0 +1,124 @@
+/* Larger hands and controls; table contents use 1.6 times their original sizes. */
+body{font-size:16px}
+.plain,.header-center{font-size:14px}
+.eyebrow{font-size:11px}
+.team-label,.contract,.score-title,.room-info{font-size:14px}
+.score-title span,.score-details,.small-note{font-size:12px}
+.mode-tag{font-size:12px}
+.table-topline{font-size:15px}.table-topline span:last-child{font-size:12px}
+.hand-heading{font-size:15px}.hand-heading small{font-size:12px}
+.hand-tools .plain{font-size:13px}
+.validation strong{font-size:15px}.validation small{font-size:13px;line-height:1.6}
+.primary,.secondary{font-size:15px}.table-footer{font-size:12px}
+.right-panel h3{font-size:18px}.right-panel h3 span{font-size:12px}
+.bid-summary,.event{font-size:14px;line-height:1.7}.event-label{font-size:12px}
+.empty-feed,.bid-chip{font-size:12px}.event-feed{overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none}
+.feed-cards{display:block;margin-top:4px;color:#294e3e;font-weight:650;overflow-wrap:anywhere}
+.suit-text,#trump,#mobileTrump{color:var(--ink)}
+.suit-text.red,#trump.red,#mobileTrump.red{color:var(--red)}
+.hand-region .full-hand{height:var(--hand-area-height,136px)}
+.hand-region .full-hand .card{height:var(--hand-card-height,104px)}
+.hand-region .full-hand .card.received-card{border:2px solid #b88b3b;background:#fff7dc;box-shadow:inset 3px 0 #d6ae55,0 3px 7px #56431b22}
+.received-card .corner{font-weight:800;text-shadow:0 .2px currentColor}
+.table-tools{display:flex;align-items:center;gap:14px;min-height:32px;margin:-5px 0 8px;color:#738473;font-size:13px;flex-wrap:wrap}
+.record-plays-control{display:inline-flex;align-items:center;gap:7px;color:#355d47;font-weight:600;cursor:pointer}
+.record-plays-control input{width:18px;height:18px;accent-color:#28584a}
+.table-tools>small{font-size:12px}.table-tools>#feedButton{margin-left:auto;display:none}
+.settlement-details{min-width:0;flex:1}.review-heading{font-size:16px}.review-heading small{font-size:13px}
+.score-equation{font-size:14px}.settlement-formula>small{font-size:12px}
+.settlement-confirm .primary{font-size:15px}.settlement-confirm small{font-size:12px;max-width:280px}
+.review-players{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.review-person{padding:4px 9px;border-radius:20px;background:#e0e5d9;color:#78836d;font-size:12px}
+.review-person.confirmed{background:#d7e7d6;color:#315c42}
+.needs-confirmation{border-color:#c9ae70;box-shadow:0 0 0 2px #c9ae701c}
+.feed-dialog{text-align:left;width:480px}.feed-dialog h2{margin:8px 0 18px}
+.feed-dialog .event-feed{max-height:55dvh;min-height:180px;margin-top:14px}
+.setup-form label,.toggle-row strong{font-size:13px}.mode-option strong{font-size:14px}.mode-option small,.toggle-row small,.setup-footnote{font-size:11px}
+.setup-error,.setup-intro p,.result-dialog p{font-size:13px}
+/* Keep the table scale scoped: the hand canvas and dialogs retain their sizes. */
+.table-surface{--table-scale:1.6;--table-card-base-width:44px;--table-card-base-height:64px;--table-card-index:11px;--table-card-suit:10px;--table-card-center:23px;min-height:600px}
+.table-surface .player-badge{gap:12.8px}
+.table-surface .avatar{width:46.4px;height:46.4px;flex-shrink:0;font-size:17.6px}
+.table-surface .player-text strong{font-size:17.6px;max-width:150.4px}
+.table-surface .player-heading .player-name{flex:1;max-width:100%}
+.table-surface .player-text small{font-size:12.8px;margin-top:4.8px}
+.table-surface .banker-badge{font-size:12.8px;padding:1.6px 6.4px}
+.table-surface .ai-control-badge{font-size:14.4px}
+.table-surface .table-status{font-size:16px;padding:9.6px 20.8px;max-width:80%;white-space:normal;top:54%}
+.table-surface .kitty-area{font-size:14.4px}
+.table-surface .table-watermark{font-size:32px}.table-surface .table-watermark small{font-size:12.8px}
+.table-surface .play .card{width:calc(var(--table-card-base-width)*var(--table-scale));min-width:calc(var(--table-card-base-width)*var(--table-scale));height:calc(var(--table-card-base-height)*var(--table-scale));border-radius:8px}
+.table-surface .play .corner{font-size:calc(var(--table-card-index)*var(--table-scale));left:6.4px;top:6.4px}
+.table-surface .play .corner span{font-size:calc(var(--table-card-suit)*var(--table-scale))}
+.table-surface .play .card-center{font-size:calc(var(--table-card-center)*var(--table-scale))}
+.table-surface .play .royal .card-center{font-size:60.8px}.table-surface .play .joker .card-center{font-size:48px}
+.table-surface .play .joker .corner{font-size:14.4px}
+.table-surface .card .trump-dot{width:8px;height:8px;right:8px;top:8px}
+.table-surface .declaration-label{font-size:16px;top:calc(100% + 12.8px)}
+.table-surface .play.declaration.south .declaration-label{top:-32px}
+.table-surface .trick-winner{font-size:16px;padding:6.4px 16px;top:calc(100% + 11.2px)}
+.table-surface .trick-winner::before{font-size:12.8px}
+.table-surface .play.south .trick-winner{top:auto;bottom:calc(100% + 11.2px)}
+.table-surface .play.west .trick-winner,.table-surface .play.west .declaration-label{left:0;transform:none}
+.table-surface .play.east .trick-winner,.table-surface .play.east .declaration-label{left:auto;right:0;transform:none}
+.table-surface .play-notice{font-size:17.6px;padding:8px 16px}
+.table-surface .play-notices{top:-44px}.table-surface .seat.north .play-notices,.table-surface .seat.south .play-notices{top:0;left:calc(50% + 133px)}
+.table-surface .seat.west{left:22px;width:210px;top:30%}.table-surface .seat.east{right:22px;width:210px;top:30%}
+.table-surface .play.west{left:clamp(70px,16%,180px);top:44%}.table-surface .play.east{right:clamp(70px,16%,180px);top:44%}
+.table-surface .play.south{bottom:110px}.table-surface.self-view .play.south{bottom:165px}
+.table-surface .mini-hand{height:91.2px;overflow-x:auto;overflow-y:hidden}
+.table-surface .mini-hand .card{width:56px;min-width:56px;height:84.8px;margin-left:-32px}
+.table-surface .mini-hand .card:first-child{margin-left:0}
+.table-surface .mini-hand .corner,.table-surface .mini-hand .corner span{font-size:16px;left:4.8px;top:6.4px}
+.table-surface.self-view .seat.south .mini-hand{height:56px}
+.table-surface.self-view .seat.south .mini-hand .card{width:38.4px;min-width:38.4px;height:56px;margin-left:-14.4px}
+.table-surface.self-view .seat.south .mini-hand .card:first-child{margin-left:0}
+.table-surface.self-view .seat.south .mini-hand .corner{font-size:14.4px;left:3.2px;top:3.2px}
+.table-surface.self-view .seat.south .mini-hand .corner span{font-size:12.8px}
+.table-surface .side-hand{grid-template-columns:repeat(2,48px)}
+.table-surface .card-chip{width:48px;height:22.4px;min-height:22.4px;font-size:14.4px;line-height:16px}
+.table-surface .kitty-area .card{width:38.4px;min-width:38.4px;height:59.2px;margin-left:-19.2px}
+.table-surface .kitty-area .card:first-child{margin-left:0}
+.table-surface .kitty-area .corner{font-size:14.4px;left:3.2px;top:3.2px}.table-surface .kitty-area .corner span{font-size:12.8px}
+.table-surface .settlement-bottom>span{font-size:17.6px}
+.table-surface .settlement-cards .card{width:67.2px;min-width:67.2px;height:102.4px}
+.table-surface .settlement-cards .corner,.table-surface .settlement-cards .corner span{font-size:19.2px;left:6.4px;top:8px}
+.table-surface .settlement-cards .joker .corner{font-size:14.4px}
+.table-surface.reviewing{min-height:640px}.table-surface.reviewing .seat.south{bottom:180px}
+.table-surface.reviewing .play.south,.table-surface.self-view.reviewing .play.south{bottom:275px}
+@media(max-width:1150px){.table-tools>#feedButton{display:block}}
+@media(max-width:760px){
+ .table-surface{--table-card-base-width:32px;--table-card-base-height:49px;--table-card-index:10px;--table-card-center:20px;min-height:540px}
+ .table-surface .player-badge{gap:6.4px}.table-surface .player-text strong{font-size:16px;max-width:118.4px}
+ .table-surface .seat.west .player-text,.table-surface .seat.east .player-text{width:118px}
+ .table-surface .seat.west{left:10px;width:118px;top:145px}.table-surface .seat.east{right:10px;width:118px;top:145px}
+ .table-surface .play.west{left:30px;top:270px}.table-surface .play.east{right:30px;top:270px}
+ .table-surface .play.north{top:125px}.table-surface .play.south{bottom:110px}
+ .table-surface .play .corner{left:3.2px;top:4.8px}
+ .table-surface .table-status{font-size:14.4px;top:46%;max-width:70%;padding:7px 10px}
+ .table-surface .declaration-label{font-size:14.4px;top:calc(100% + 9.6px)}
+ .table-surface .trick-winner{font-size:14.4px;padding:4.8px 11.2px;top:calc(100% + 8px)}
+ .table-surface .play.south .trick-winner{top:auto;bottom:calc(100% + 8px)}
+ .table-surface .play-notice{font-size:16px;padding:6.4px 11.2px}
+ .table-surface .seat.north .play-notices,.table-surface .seat.south .play-notices{left:calc(50% + 100px)}
+ .table-surface .mini-hand{height:78.4px}.table-surface .mini-hand .card{width:46.4px;min-width:46.4px;height:70.4px}
+ .table-surface .side-hand{grid-template-columns:repeat(2,40px)}.table-surface .card-chip{width:40px;height:19.2px;min-height:19.2px;font-size:12.8px}
+ .table-surface .settlement-cards{gap:3px}.table-surface .settlement-cards .card{width:46.4px;min-width:46.4px;height:76.8px}
+ .table-surface .settlement-cards .corner,.table-surface .settlement-cards .corner span{font-size:16px;left:4.8px;top:6.4px}
+ .table-surface .settlement-cards .joker .corner{font-size:14.4px}
+ .table-surface .settlement-cards .trump-dot{width:6.4px;height:6.4px;right:4.8px;top:6.4px}
+ .table-surface .settlement-bottom{max-width:calc(100% - 20px)}.table-surface .settlement-cards{flex-wrap:wrap;max-width:220px;margin:auto}
+ .table-surface.reviewing{min-height:650px}.table-surface.reviewing .seat.west,.table-surface.reviewing .seat.east{top:145px}
+ .table-surface.reviewing .play.west,.table-surface.reviewing .play.east{top:270px}
+ .table-surface.reviewing .seat.south{bottom:225px}.table-surface.reviewing .play.south,.table-surface.self-view.reviewing .play.south{bottom:320px}
+ header{height:auto;min-height:64px;gap:10px;padding:10px 12px;flex-wrap:wrap}.header-actions{flex-wrap:wrap;gap:2px}.header-actions .plain{font-size:12px;padding:5px;min-height:32px}
+ .mobile-summary{font-size:13px}.table-topline{font-size:14px}.table-topline span:last-child{font-size:11px}
+ .table-tools{gap:8px;font-size:12px;min-height:32px}.table-tools>small{font-size:11px}.table-tools>#feedButton{font-size:12px;min-height:32px}
+ .hand-heading{font-size:14px}.hand-tools .plain{font-size:12px}
+ .hand-region{gap:8px}.hand-region .full-hand{height:var(--hand-area-height,128px)}
+ .hand-region .full-hand .card{height:var(--hand-card-height,96px)}
+ .validation strong{font-size:14px}.validation small{font-size:12px;max-width:220px}
+ .action-bar{gap:8px}.primary,.secondary{font-size:14px;padding:11px 14px}.table-footer{font-size:11px}
+ .settlement-confirm{align-items:flex-start;flex-direction:column;gap:8px}.settlement-confirm small{max-width:none}
+ .review-heading{font-size:15px}.review-heading small{font-size:12px}.score-equation{font-size:13px}
+}
