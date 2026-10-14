@@ -281,7 +281,7 @@ class LiveHTTP(unittest.TestCase):
         self.assertEqual(self.gateway.worker.release, release)
 
     def test_requests_queue_while_updating_without_new_session(self):
-        state = self.request('/api/session', {'mode': 'self', 'seed': 9})[1]
+        state = self.request('/api/session', {'name': '测试玩家', 'mode': 'self', 'seed': 9})[1]
         release = self.change_frontend('queue-check')
         entered = threading.Event()
         original = Worker.__init__
@@ -310,7 +310,7 @@ class LiveHTTP(unittest.TestCase):
         self.assertEqual(latest['state']['hands'][0], state['state']['hands'][0])
 
     def test_long_poll_is_drained_before_switching_workers(self):
-        state = self.request('/api/session', {'mode': 'self', 'seed': 21})[1]
+        state = self.request('/api/session', {'name': '测试玩家', 'mode': 'self', 'seed': 21})[1]
         release = self.change_frontend('long-poll')
         with ThreadPoolExecutor(1) as pool:
             pending = pool.submit(self.request, f"/api/state?since={state['version']}&wait=0.5", None, state['token'])
@@ -336,7 +336,7 @@ class LiveHTTP(unittest.TestCase):
             server.shutdown(); server.server_close(); thread.join(2)
 
     def test_bad_backend_rolls_back_keeps_old_html_and_tokens(self):
-        state = self.request('/api/session', {'mode': 'self', 'seed': 11})[1]
+        state = self.request('/api/session', {'name': '测试玩家', 'mode': 'self', 'seed': 11})[1]
         old, html = self.gateway.worker, self.request('/')[1]
         path = self.source / 'tractor_sim' / 'worker.py'
         original = path.read_text(encoding='utf-8')
@@ -370,7 +370,7 @@ class LiveHTTP(unittest.TestCase):
         self.assertFalse((release / '.git').exists())
 
     def test_reset_ends_rooms_but_keeps_gateway_public_domain_and_instance(self):
-        state = self.request('/api/session', {'mode': 'self'})[1]
+        state = self.request('/api/session', {'name': '测试玩家', 'mode': 'self'})[1]
         instance = self.gateway.instance_id
         public_url = 'https://same-domain.trycloudflare.com'
         private_json(self.gateway.public_entry, {'instance_id': instance, 'public_url': public_url})
@@ -381,4 +381,4 @@ class LiveHTTP(unittest.TestCase):
         status, stale = self.request('/api/state', token=state['token'])
         self.assertEqual(status, 403)
         self.assertEqual(stale['code'], 'SESSION')
-        self.assertEqual(self.request('/api/session', {'mode': 'self'})[0], 200)
+        self.assertEqual(self.request('/api/session', {'name': '测试玩家', 'mode': 'self'})[0], 200)

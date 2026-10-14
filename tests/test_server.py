@@ -43,6 +43,33 @@ class RoomAPI(unittest.TestCase):
         self.assertEqual(self.request('/api/room/start', {}, clients[0]['token'])[0], 200)
         return clients
 
+    def test_new_sessions_require_a_valid_nickname_without_allocating_resources(self):
+        registry = self.server.registry
+        rooms_before = set(registry.rooms)
+        tokens_before = set(registry.tokens)
+        invalid_names = [None, False, 7, {}, [], '', ' \t\n\u3000 ', 'x' * 25]
+        for mode in ('self', 'pve', 'pvp'):
+            for fields in [{}] + [{'name': name} for name in invalid_names]:
+                with self.subTest(mode=mode, fields=fields):
+                    status, error = self.request('/api/session', {
+                        'mode': mode, 'room': 'invalid_nickname', **fields})
+                    self.assertEqual(status, 400)
+                    self.assertEqual(error['error'], 'REQUEST')
+                    self.assertIn('昵称', error['message'])
+                    self.assertEqual(set(registry.rooms), rooms_before)
+                    self.assertEqual(set(registry.tokens), tokens_before)
+
+    def test_nicknames_are_trimmed_and_preserved_on_reconnect(self):
+        for mode, name in [('self', '  小周  '), ('pve', 'x' * 24), ('pvp', '  小王\u3000')]:
+            with self.subTest(mode=mode):
+                status, session = self.request('/api/session', {'mode': mode, 'name': name})
+                self.assertEqual(status, 200)
+                self.assertEqual(session['name'], name.strip())
+                status, reconnected = self.request('/api/state', token=session['token'])
+                self.assertEqual(status, 200)
+                self.assertEqual(reconnected['name'], name.strip())
+                self.assertEqual(self.request('/api/leave', {}, session['token'])[0], 200)
+
     def test_four_confirmed_seats_host_start_and_privacy(self):
         clients=[]
         for i in range(4):
@@ -72,17 +99,17 @@ class RoomAPI(unittest.TestCase):
         self.assertEqual(status,422);self.assertEqual(waiting['code'],'IN_PROGRESS')
 
     def test_stale_action_atomic_and_auth(self):
-        _,s=self.request('/api/session',{'mode':'self','seed':3})
+        _,s=self.request('/api/session',{'name': '测试玩家', 'mode':'self','seed':3})
         status,_=self.request('/api/action',{'version':-1,'action':{'type':'pass'}},s['token'])
         self.assertEqual(status,409)
         _,after=self.request('/api/state',token=s['token']);self.assertEqual(after['state']['deal_count'],1)
         self.assertEqual(self.request('/api/state')[0],403)
 
     def test_self_and_pve_visibility(self):
-        _,s=self.request('/api/session',{'mode':'self'})
+        _,s=self.request('/api/session',{'name': '测试玩家', 'mode':'self'})
         self.assertIn('hands',s['state']);self.assertEqual(s['controlled'],list(range(4)))
         self.assertIsNone(s['state']['kitty'])
-        _,p=self.request('/api/session',{'mode':'pve','seat':0})
+        _,p=self.request('/api/session',{'name': '测试玩家', 'mode':'pve','seat':0})
         self.assertNotIn('hands',p['state']);self.assertEqual(sum(x['bot'] for x in p['players']),3)
 
     def realtime_room(self, code):
@@ -158,7 +185,7 @@ class RoomAPI(unittest.TestCase):
 
     def test_validate_binds_to_version_and_authoritative_level(self):
         from test_rules import c, fixture
-        _,session=self.request('/api/session',{'mode':'self'})
+        _,session=self.request('/api/session',{'name': '测试玩家', 'mode':'self'})
         token=session['token'];room=self.server.registry.lookup(token)
         with room.condition:
             room.env=fixture([c('D',5),c('C',8),c('S',9),c('D',8)+[53]],level=2,trump='H')
@@ -201,7 +228,7 @@ class RoomAPI(unittest.TestCase):
         self.assertNotIn('token',entries[0]);self.assertNotIn('hands',entries[0]);self.assertNotIn('kitty',entries[0])
 
     def test_reconnect_keeps_hand(self):
-        _,s=self.request('/api/session',{'mode':'self','seed':5})
+        _,s=self.request('/api/session',{'name': '测试玩家', 'mode':'self','seed':5})
         _,a=self.request('/api/state',token=s['token']);_,b=self.request('/api/state',token=s['token'])
         self.assertEqual(a['state']['hand'],b['state']['hand']);self.assertEqual(a['seat'],b['seat'])
 
@@ -213,7 +240,7 @@ class RoomAPI(unittest.TestCase):
         with self.assertRaises(OSError):TractorServer(self.server.server_address)
 
     def test_malformed_action_rejected_atomically(self):
-        _,s=self.request('/api/session',{'mode':'self'})
+        _,s=self.request('/api/session',{'name': '测试玩家', 'mode':'self'})
         for action in ([],None,'pass',4):
             status,res=self.request('/api/validate',{'action':action},s['token'])
             self.assertEqual(status,422);self.assertEqual(res['code'],'ACTION')
@@ -266,7 +293,7 @@ class RoomAPI(unittest.TestCase):
 
     def test_connectivity_is_checked_without_waiting_for_bot_tick(self):
         registry = Registry()
-        clients = [registry.enter({'mode': 'pvp', 'room': 'immediate_pause'}) for _ in range(4)]
+        clients = [registry.enter({'name': '测试玩家', 'mode': 'pvp', 'room': 'immediate_pause'}) for _ in range(4)]
         room = registry.lookup(clients[0]['token'])
         with room.condition:
             for i, client in enumerate(clients): room.confirm_seat(client['token'], i)
@@ -292,13 +319,13 @@ class RoomAPI(unittest.TestCase):
         _, remaining = self.request('/api/state', token=clients[1]['token'])
         self.assertTrue(remaining['host']); self.assertFalse(remaining['paused'])
         self.assertTrue(remaining['players'][0]['bot'])
-        status, error = self.request('/api/session', {'mode': 'pvp', 'room': 'host_leaves'})
+        status, error = self.request('/api/session', {'name': '测试玩家', 'mode': 'pvp', 'room': 'host_leaves'})
         self.assertEqual((status, error['code']), (422, 'IN_PROGRESS'))
         self.assertEqual(self.request('/api/leave', {}, clients[0]['token'])[0], 200)
         self.assertEqual(self.request('/api/state', token=clients[0]['token'])[0], 403)
 
     def test_autoplay_does_not_treat_string_false_as_true(self):
-        _, session = self.request('/api/session', {'mode': 'self'})
+        _, session = self.request('/api/session', {'name': '测试玩家', 'mode': 'self'})
         status, _ = self.request('/api/autoplay', {'enabled': 'false'}, session['token'])
         self.assertEqual(status, 400)
         _, after = self.request('/api/state', token=session['token'])

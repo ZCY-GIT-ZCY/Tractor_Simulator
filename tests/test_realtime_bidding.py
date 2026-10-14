@@ -199,7 +199,7 @@ class GraceAsyncPolicies(unittest.TestCase):
             def __init__(self,seed):pass
             def act(self,obs):return obs['bid_options'][0] if obs['bid_options'] else {'type':'pass'}
         registry=Registry(policy_factory=BidPolicy)
-        s=registry.enter({'mode':'pve','seat':1});room=registry.lookup(s['token'])
+        s=registry.enter({'name': '测试玩家', 'mode':'pve','seat':1});room=registry.lookup(s['token'])
         with room.condition:
             room.env=waiting_deal();room.sync_bidding_window();room.next_bot_at=0
         thread=threading.Thread(target=registry.run_bots);thread.start()
@@ -219,7 +219,7 @@ class GraceAsyncPolicies(unittest.TestCase):
                 entered.set();release.wait(3)
                 return obs['bid_options'][0] if obs['bid_options'] else {'type':'pass'}
         registry=Registry(policy_factory=SlowPolicy)
-        s=registry.enter({'mode':'pve','seat':1});room=registry.lookup(s['token'])
+        s=registry.enter({'name': '测试玩家', 'mode':'pve','seat':1});room=registry.lookup(s['token'])
         with room.condition:
             room.env=waiting_deal();room.sync_bidding_window();room.next_bot_at=0
         thread=threading.Thread(target=registry.run_bots);thread.start()

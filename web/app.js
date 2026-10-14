@@ -515,9 +515,12 @@ for(const b of document.querySelectorAll('[data-mode]'))b.onclick=()=>chooseMode
 $('auctionInput').onchange=()=>$('bankerOptions').hidden=$('auctionInput').checked;
 $('teamInput').onchange=updateBanker;
 $('setupForm').onsubmit=async e=>{
- e.preventDefault();if(e.target.querySelector('[type=submit]').disabled)return;$('setupError').textContent='';const button=e.target.querySelector('[type=submit]');button.disabled=true;
+ e.preventDefault();if(e.target.querySelector('[type=submit]').disabled)return;$('setupError').textContent='';
+ const name=$('nameInput').value.trim();
+ if(!name||name.length>24){$('setupError').textContent=!name?'请输入你的昵称':'昵称最多 24 个字符';$('nameInput').focus();return;}
+ const button=e.target.querySelector('[type=submit]');button.disabled=true;
  pollGeneration++;const scope=sessionScope();
- try{const data=await api('/api/session',{mode,name:$('nameInput').value,room:$('roomInput').value,seat:Number($('humanSeatInput').value),config:{initial_level:Number($('levelInput').value),auction:$('auctionInput').checked,banker:Number($('bankerInput').value)}});if(!currentSession(scope))return;token=data.token;sessionStorage.setItem('tractor_session',token);snap=null;closedResult=null;acceptSnapshot(data);rememberSeat();$('resumeButton').hidden=true;poll(++pollGeneration);}
+ try{const data=await api('/api/session',{mode,name,room:$('roomInput').value,seat:Number($('humanSeatInput').value),config:{initial_level:Number($('levelInput').value),auction:$('auctionInput').checked,banker:Number($('bankerInput').value)}});if(!currentSession(scope))return;token=data.token;sessionStorage.setItem('tractor_session',token);snap=null;closedResult=null;acceptSnapshot(data);rememberSeat();$('resumeButton').hidden=true;poll(++pollGeneration);}
  catch(err){if(currentSession(scope)){$('setupError').textContent=err.message;button.disabled=false;if(token)poll(++pollGeneration);}}finally{button.disabled=false;}
 };
 $('clearButton').onclick=()=>{selected.clear();syncSelection();validateSelection();};
@@ -571,5 +574,5 @@ renderNavigation();
 api('/api/site').then(site=>publicURL=site.public_url||'').catch(()=>{});
 if(invitedRoom&&/^[A-Za-z0-9_-]{3,24}$/.test(invitedRoom)){$('roomInput').value=invitedRoom;chooseMode('pvp');$('inviteNotice').textContent='你收到房间 '+invitedRoom+' 的邀请，填写名字并确认座位即可入座。';$('inviteNotice').hidden=false;if(remembered?.room!==invitedRoom)token=null;}
 else if(!['localhost','127.0.0.1','::1'].includes(location.hostname))chooseMode('pvp');
-if(remembered&&(!invitedRoom||remembered.room===invitedRoom)){$('resumeButton').hidden=false;$('resumeButton').textContent='回到上次牌桌'+(remembered.mode==='pvp'?' · '+remembered.room:'');$('nameInput').value=remembered.name||'牌友';}
+if(remembered&&(!invitedRoom||remembered.room===invitedRoom)){$('resumeButton').hidden=false;$('resumeButton').textContent='回到上次牌桌'+(remembered.mode==='pvp'?' · '+remembered.room:'');}
 if(token){const scope=sessionScope();api('/api/state').then(data=>{if(!currentSession(scope))return;acceptSnapshot(data);rememberSeat();poll(++pollGeneration);}).catch(e=>{if(!currentSession(scope))return;if(e.code==='SESSION')forgetSeat(scope.token);resetUI();if(e.code!=='SESSION')toast('暂时无法重连，可点击回到上次牌桌');});}

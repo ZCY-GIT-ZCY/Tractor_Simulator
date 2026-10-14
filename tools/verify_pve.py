@@ -26,7 +26,7 @@ def verify(base, seat=0):
         latencies.append(time.monotonic()-started)
         return result
     assert request("/api/health")[1]["pve_ai"] == AI_ID
-    status, snap = request("/api/session",{"mode":"pve","seat":seat,"seed":121,
+    status, snap = request("/api/session",{"mode":"pve","name":"QA human","seat":seat,"seed":121,
                           "config":{"initial_level":11,"auction":False,"banker":0}})
     assert status == 200
     token = snap["token"]

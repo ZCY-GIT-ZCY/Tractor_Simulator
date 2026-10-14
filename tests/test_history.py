@@ -50,7 +50,7 @@ class HistoryTests(unittest.TestCase):
 
     def test_save_restart_exact_snapshots_and_hidden_bottom_projection(self):
         registry = self.registry()
-        session = registry.enter({"mode": "self", "seed": 11,
+        session = registry.enter({'name': '测试玩家', "mode": "self", "seed": 11,
                                   "config": {"initial_level": 11, "auction": False}})
         room = registry.lookup(session["token"])
         with room.condition:
@@ -86,7 +86,7 @@ class HistoryTests(unittest.TestCase):
 
     def test_old_replay_reconstructs_bottom_from_last_burial_only_at_settlement(self):
         registry = self.registry()
-        session = registry.enter({'mode': 'self', 'seed': 11,
+        session = registry.enter({'name': '测试玩家', 'mode': 'self', 'seed': 11,
                                   'config': {'initial_level': 11, 'auction': False}})
         room = registry.lookup(session['token'])
         with room.condition:
@@ -106,7 +106,7 @@ class HistoryTests(unittest.TestCase):
             self.assertNotIn('settlement_kitty', f['state'])
 
     def test_no_active_round_published_and_illegal_action_not_recorded(self):
-        registry = self.registry();session = registry.enter({"mode": "self", "seed": 2})
+        registry = self.registry();session = registry.enter({'name': '测试玩家', "mode": "self", "seed": 2})
         room = registry.lookup(session["token"])
         self.assertEqual(registry.history.listing()["records"], [])
         before = copy.deepcopy(room.recording.frames)
@@ -118,7 +118,7 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(registry.history.listing()["records"], [])
 
     def test_next_round_has_new_recording_and_save_is_idempotent(self):
-        registry = self.registry();s = registry.enter({"mode": "self", "seed": 18})
+        registry = self.registry();s = registry.enter({'name': '测试玩家', "mode": "self", "seed": 18})
         room = registry.lookup(s["token"]);self.finish(room)
         old_id,old_record = room.replay_id,room.recording
         self.assertEqual(registry.history.save(old_record,mode="self",room=room.code,
@@ -131,14 +131,14 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(len(registry.history.listing()["records"]), 2)
 
     def test_entropy_seed_snapshot_does_not_require_seed_reconstruction(self):
-        registry = self.registry();s = registry.enter({"mode": "self"})
+        registry = self.registry();s = registry.enter({'name': '测试玩家', "mode": "self"})
         room = registry.lookup(s["token"]);self.finish(room)
         replay = registry.history.read(room.replay_id)
         self.assertEqual(replay["meta"]["result"], room.env.result)
         self.assertEqual(replay["frames"][0]["state"]["hands"], room.recording.frames[0]["state"]["hands"])
 
     def test_no_bid_redeal_is_in_same_round_recording(self):
-        registry = self.registry();s = registry.enter({"mode": "self", "seed": 20})
+        registry = self.registry();s = registry.enter({'name': '测试玩家', "mode": "self", "seed": 20})
         room = registry.lookup(s["token"])
         for _ in range(99):room.step({"type": "pass"})
         self.assertTrue(self.skip_bidding_wait(room))
@@ -161,7 +161,7 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(store.read(identifier)["frames"][-1]["state"]["kitty"],env.kitty)
 
     def test_failed_throw_keeps_attempt_and_records_only_actual_cards_removed(self):
-        registry=self.registry();session=registry.enter({'mode':'self','seed':34,'config':{'auction':False}})
+        registry=self.registry();session=registry.enter({'name': '测试玩家', 'mode':'self','seed':34,'config':{'auction':False}})
         room=registry.lookup(session['token']);policy=RandomPolicy(98);failed_frame=None
         for _ in range(1000):
             if room.env.phase in ('round_end','match_end'):break
@@ -189,7 +189,7 @@ class HistoryTests(unittest.TestCase):
         self.assertIn(failed_frame,replay['frames'])
 
     def test_bot_final_action_is_recorded_and_saved(self):
-        registry=self.registry();s=registry.enter({"mode":"self","seed":9})
+        registry=self.registry();s=registry.enter({'name': '测试玩家', "mode":"self","seed":9})
         room=registry.lookup(s["token"]);policy=RandomPolicy(123)
         for _ in range(1000):
             if self.skip_bidding_wait(room):continue
@@ -208,7 +208,7 @@ class HistoryTests(unittest.TestCase):
         finally:registry.stopped.set();worker.join(2)
 
     def test_failed_write_does_not_undo_completed_game(self):
-        registry=self.registry();s=registry.enter({'mode':'self','seed':15});room=registry.lookup(s['token'])
+        registry=self.registry();s=registry.enter({'name': '测试玩家', 'mode':'self','seed':15});room=registry.lookup(s['token'])
         with patch.object(registry.history,'save',side_effect=OSError('disk full')),patch('builtins.print'):
             self.finish(room)
         self.assertIn(room.env.phase,('round_end','match_end'));self.assertIsNone(room.replay_id)

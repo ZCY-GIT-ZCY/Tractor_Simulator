@@ -317,7 +317,7 @@ class AsyncPolicies(unittest.TestCase):
         self_seen = []
         registry = Registry(policy_factory=SlowPolicy)
         # After AI seat 0 draws, counterclockwise rotation reaches human 3.
-        session = registry.enter({"mode":"pve","seat":3})
+        session = registry.enter({'name': '测试玩家', "mode":"pve","seat":3})
         room = registry.lookup(session["token"])
         room.next_bot_at = 0
         thread = threading.Thread(target=registry.run_bots)
@@ -347,7 +347,7 @@ class AsyncPolicies(unittest.TestCase):
 
     def test_default_pve_has_three_separate_enoch_instances(self):
         registry = Registry()
-        s = registry.enter({"mode":"pve","seat":2})
+        s = registry.enter({'name': '测试玩家', "mode":"pve","seat":2})
         room = registry.lookup(s["token"])
         self.assertEqual(s["ai"]["id"],AI_ID)
         self.assertEqual(sum(p["bot"] for p in s["players"]),3)
@@ -358,7 +358,7 @@ class AsyncPolicies(unittest.TestCase):
 
     def test_custom_policy_metadata_and_string_seed(self):
         registry = Registry(policy_factory=RandomPolicy)
-        session = registry.enter({"mode":"pve","seed":"text-seed"})
+        session = registry.enter({'name': '测试玩家', "mode":"pve","seed":"text-seed"})
         self.assertEqual(session["ai"]["id"],"custom")
         self.assertTrue(all(isinstance(p,RandomPolicy) for p in
                             registry.lookup(session["token"]).policies))

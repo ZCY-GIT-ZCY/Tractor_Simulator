@@ -82,6 +82,8 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 
 ## HTTP
 
+所有模式的 `POST /api/session` 都要求 `name` 为非空字符串，去掉首尾空白后最多 24 个字符；缺失、空白、非字符串或超长昵称返回 400 REQUEST，不创建房间或会话。首页不预填“牌友”等昵称，新入座须填写；使用已有凭据重连仍保留原昵称。
+
 `POST` 请求体必须为 JSON 对象，Content-Type 为 application/json，最大 64 KiB。除创建会话、health、site、静态文件、规则外，均带 `Authorization: Bearer <token>`。token 不放 URL，每个标签存 sessionStorage，并在本浏览器 localStorage 保存最近会话以便重新打开后主动恢复。邀请链接只有房间号，没有座位凭据。
 
 | 请求 | 请求内容 | 返回 |

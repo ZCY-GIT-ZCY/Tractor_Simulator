@@ -10,11 +10,11 @@ const vm = require('node:vm');
 function browser(initialToken = null, saved = null) {
  const elements = new Map(), requests = [], listeners = new Map(), timers = new Map(), beacons=[];let timerId=0;
  function element(id) {
-  if (!elements.has(id)) elements.set(id, {id, hidden:true, disabled:false, value:'0', checked:true,
+  if (!elements.has(id)) elements.set(id, {id, hidden:true, disabled:false, value:id==='nameInput'?'':'0', checked:true,
    dataset:{}, style:{setProperty(){}}, classList:{toggle(){}}, clientWidth:900,
    innerHTML:'', textContent:'', addEventListener(){}, setAttribute(){},
    querySelector(selector){return element(id+selector);}, querySelectorAll(){return [];},
-   appendChild(child){child.parentElement=this;}, click(){return this.onclick?.();}, select(){}});
+   appendChild(child){child.parentElement=this;}, click(){return this.onclick?.();}, select(){}, focus(){this.focused=true;}});
   return elements.get(id);
  }
  function storage(entries) {
@@ -60,6 +60,39 @@ function sit(browser,data=snapshot()) {
  browser.run('token=fixture.token;acceptSnapshot(fixture);rememberSeat()');
 }
 function latest(browser,path){return browser.requests.findLast(r=>r.url===path);}
+
+test('blank or overlong nicknames do not join or disturb an existing session',async()=>{
+ for(const name of ['', ' \t\u3000 ', 'x'.repeat(25)]){
+  const b=browser();sit(b);const generation=b.get('pollGeneration');
+  b.element('nameInput').value=name;
+  await b.element('setupForm').onsubmit({preventDefault(){},target:b.element('setupForm')});
+  assert.equal(latest(b,'/api/session'),undefined);
+  assert.match(b.element('setupError').textContent,/昵称/);
+  assert.equal(b.element('nameInput').focused,true);
+  assert.equal(b.element('setupForm[type=submit]').disabled,false);
+  assert.equal(b.get('pollGeneration'),generation);
+  assert.equal(b.get('token'),'token_one');assert.equal(b.get('snap.room'),'room_one');
+ }
+});
+
+test('new admissions submit the explicitly entered nickname without surrounding spaces',async()=>{
+ const b=browser();b.element('nameInput').value='  小周\u3000';
+ const joining=b.element('setupForm').onsubmit({preventDefault(){},target:b.element('setupForm')});
+ const request=latest(b,'/api/session');assert.ok(request);
+ assert.equal(JSON.parse(request.options.body).name,'小周');
+ request.reply(snapshot());await joining;
+ assert.equal(b.get('token'),'token_one');assert.equal(b.element('setupOverlay').hidden,true);
+});
+
+test('a remembered seat offers token-based resume without prefilling a new nickname',async()=>{
+ const b=browser(null,{token:'token_one',room:'room_one',mode:'pvp',name:'牌友'});
+ assert.equal(b.element('nameInput').value,'');
+ assert.equal(b.element('resumeButton').hidden,false);
+ const resume=b.element('resumeButton').onclick();
+ const request=latest(b,'/api/state');assert.equal(request.options.headers.Authorization,'Bearer token_one');
+ request.reply({...snapshot(),name:'原昵称'});await resume;
+ assert.equal(b.get('snap.name'),'原昵称');assert.equal(latest(b,'/api/session'),undefined);
+});
 
 test('pagehide reports this page once without relinquishing the seat or resume token',async()=>{
  const b=browser();sit(b);const before=b.get('pollGeneration');
@@ -510,6 +543,7 @@ test('late autoplay response cannot restore a table after leaving',async()=>{
 test('old bootstrap reply cannot overwrite a newly joined room',async()=>{
  const b=browser('old_token');
  const bootstrap=latest(b,'/api/state');
+ b.element('nameInput').value='新玩家';
  const joining=b.element('setupForm').onsubmit({preventDefault(){},target:b.element('setupForm')});
  latest(b,'/api/session').reply(snapshot('new_room','new_token'));await joining;
  bootstrap.reply(snapshot('old_room','old_token'));await new Promise(setImmediate);

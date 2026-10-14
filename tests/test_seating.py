@@ -267,13 +267,13 @@ class SeatingAPI(unittest.TestCase):
         clients = [self.enter(str(i)) for i in range(4)]
         for seat, client in enumerate(clients): self.confirm(client, seat)
         code = clients[0]['room']
-        status, error = self.request('/api/session', {'mode': 'pvp', 'room': code})
+        status, error = self.request('/api/session', {'name': '测试玩家', 'mode': 'pvp', 'room': code})
         self.assertEqual((status, error['code']), (422, 'ROOM_FULL'))
         room = self.server.registry.lookup(clients[0]['token'])
         with room.condition:
             room.leave(clients[3]['token'])
             room.started = True; room.env.phase = 'match_end'
-        status, error = self.request('/api/session', {'mode': 'pvp', 'room': code})
+        status, error = self.request('/api/session', {'name': '测试玩家', 'mode': 'pvp', 'room': code})
         self.assertEqual((status, error['code']), (422, 'MATCH_FINISHED'))
 
     def test_waiting_confirmation_cannot_cross_start_and_cannot_replace_takeover_human(self):

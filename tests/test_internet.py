@@ -32,11 +32,11 @@ class PublicRooms(unittest.TestCase):
 
     def test_capacity_still_allows_joining_an_existing_room(self):
         registry = Registry(max_rooms=1)
-        first = registry.enter({"mode": "pvp"})
+        first = registry.enter({'name': '测试玩家', "mode": "pvp"})
         with self.assertRaises(IllegalAction) as error:
-            registry.enter({"mode": "self"})
+            registry.enter({'name': '测试玩家', "mode": "self"})
         self.assertEqual(error.exception.code, "ROOM_LIMIT")
-        second = registry.enter({"mode": "pvp", "room": first["room"]})
+        second = registry.enter({'name': '测试玩家', "mode": "pvp", "room": first["room"]})
         self.assertIsNone(second["seat"])
         room = registry.lookup(second['token'])
         with room.condition:
@@ -45,8 +45,8 @@ class PublicRooms(unittest.TestCase):
 
     def test_inactive_members_expire_together_but_active_room_keeps_seats(self):
         registry = Registry(idle_seconds=100)
-        first = registry.enter({"mode": "pvp"})
-        second = registry.enter({"mode": "pvp", "room": first["room"]})
+        first = registry.enter({'name': '测试玩家', "mode": "pvp"})
+        second = registry.enter({'name': '测试玩家', "mode": "pvp", "room": first["room"]})
         room = registry.lookup(first["token"])
         with room.condition:
             room.clients[first["token"]]["seen"] = time.monotonic() - 101

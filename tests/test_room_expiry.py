@@ -220,7 +220,7 @@ class PagehideHTTP(unittest.TestCase):
         except urllib.error.HTTPError as error: return error.code, json.load(error)
 
     def test_body_secret_only_authenticates_registered_page_close(self):
-        status, state = self.request('/api/session', {'mode': 'pve'}, page='page_http1')
+        status, state = self.request('/api/session', {'name': '测试玩家', 'mode': 'pve'}, page='page_http1')
         self.assertEqual(status, 200)
         token = state['token']
         status, denied = self.request('/api/action', {'token': token, 'version': state['version'], 'action': {'type': 'pass'}})
@@ -235,7 +235,7 @@ class PagehideHTTP(unittest.TestCase):
         self.request('/api/leave', {}, token=token)
 
     def test_inflight_long_poll_cannot_reopen_closed_page(self):
-        _, state = self.request('/api/session', {'mode': 'pvp', 'room': 'pending_close'}, page='page_http1')
+        _, state = self.request('/api/session', {'name': '测试玩家', 'mode': 'pvp', 'room': 'pending_close'}, page='page_http1')
         token = state['token']; room = self.server.registry.lookup(token)
         before = room.clients[token]['pages']['page_http1']['seen']
         replies = []

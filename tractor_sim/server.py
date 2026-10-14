@@ -658,7 +658,12 @@ class Registry:
         mode = data.get("mode", "self")
         if mode not in ("self", "pve", "pvp"):
             raise ValueError("mode 须为 self / pve / pvp")
-        name = str(data.get("name", "玩家")).strip() or "玩家"
+        name = data.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("请输入你的昵称")
+        name = name.strip()
+        if len(name) > 24:
+            raise ValueError("昵称最多 24 个字符")
         config = GameConfig(**data.get("config", {}))
         self.prune()
         with self.lock:

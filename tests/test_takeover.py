@@ -145,7 +145,7 @@ class TakeoverAPI(unittest.TestCase):
             self.assertEqual(self.request('/api/seat/confirm', {'seat': seat}, client['token'])[0], 200)
             clients.append(client)
             if seat == 0:
-                _, waiter = self.request('/api/session', {'mode': 'pvp', 'room': 'takeover_http'})
+                _, waiter = self.request('/api/session', {'name': '测试玩家', 'mode': 'pvp', 'room': 'takeover_http'})
         self.assertEqual(self.request('/api/room/start', {}, clients[0]['token'])[0], 200)
         for value in ('true', 1, None, [], {}):
             self.assertEqual(self.request('/api/autoplay', {'enabled': value}, clients[1]['token'])[0], 400)
@@ -179,7 +179,7 @@ class AsyncTakeover(unittest.TestCase):
         (ROOT / 'build').mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=ROOT / 'build') as directory:
             registry = Registry(policy_factory=SlowPolicy, history_dir=Path(directory) / 'history')
-            clients = [registry.enter({'mode': 'pvp', 'room': 'async_takeover',
+            clients = [registry.enter({'name': '测试玩家', 'mode': 'pvp', 'room': 'async_takeover',
                 'seed': 7, 'config': {'auction': False, 'banker': 0}}) for _ in range(4)]
             room = registry.lookup(clients[0]['token'])
             with room.condition:
