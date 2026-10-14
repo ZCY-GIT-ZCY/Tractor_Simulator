@@ -451,7 +451,7 @@ async function act(action){
  const keepPreview=action.type==='pass'&&snap.state?.phase==='dealing'&&mode!=='self';
  try{const data=await api(realtime?'/api/bid':'/api/action',{version:snap.version,round:snap.state?.round,redeals:snap.state?.redeals,action});if(!currentSession(scope))return;if(!keepPreview)selected.clear();acceptSnapshot(data);}
  catch(e){if(!currentSession(scope))return;toast(e.message);if(e.code==='STALE'){try{const data=await api('/api/state');if(currentSession(scope))acceptSnapshot(data);}catch{}}}
- finally{if(currentSession(scope)){busy=false;$('passButton').disabled=false;if(snap?.state)renderHand();validateSelection();scheduleAutoDeal();}}
+ finally{if(currentSession(scope)){busy=false;$('passButton').disabled=false;if(snap?.state){renderHand();renderSettlement();}validateSelection();scheduleAutoDeal();}}
 }
 function updateAutoDeal(){$('autoDealButton').textContent=autoDeal?'暂停摸牌':'自动摸牌';$('autoDealButton').classList.toggle('is-active',autoDeal);}
 function syncAutoDealPhase(){
@@ -464,7 +464,7 @@ async function confirmResult(){
  const scope=sessionScope();busy=true;$('confirmResultButton').disabled=true;
   try{const data=await api('/api/confirm-result',{version:snap.version,round:snap.settlement.round});if(currentSession(scope))acceptSnapshot(data);}
  catch(e){if(currentSession(scope)){toast(e.message);if(e.code==='STALE'){try{const data=await api('/api/state');if(currentSession(scope))acceptSnapshot(data);}catch{}}}}
- finally{if(currentSession(scope)){busy=false;$('confirmResultButton').disabled=false;}}
+ finally{if(currentSession(scope)){busy=false;if(snap?.state)renderSettlement();}}
 }
 function scheduleAutoDeal(){
  clearTimeout(autoTimer);
@@ -537,7 +537,7 @@ async function leaveSession(){
  if(!token)return;if($('leaveButton').disabled)return;
  $('leaveButton').disabled=$('leaveLobbyButton').disabled=true;pollGeneration++;validationTicket++;autoDeal=false;clearTimeout(autoTimer);const scope=sessionScope();
  try{await api('/api/leave',{});if(!currentSession(scope))return;forgetSeat(scope.token);resetUI();}
- catch(e){if(!currentSession(scope))return;if(e.code==='SESSION'){forgetSeat(scope.token);resetUI();}else{busy=false;toast('尚未离开：'+e.message);validateSelection();poll(++pollGeneration);}}
+ catch(e){if(!currentSession(scope))return;if(e.code==='SESSION'){forgetSeat(scope.token);resetUI();}else{busy=false;toast('尚未离开：'+e.message);if(snap?.state)renderSettlement();validateSelection();poll(++pollGeneration);}}
  finally{$('leaveButton').disabled=$('leaveLobbyButton').disabled=false;}
 }
 $('leaveLobbyButton').onclick=$('leaveButton').onclick=leaveSession;

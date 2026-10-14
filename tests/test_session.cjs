@@ -437,6 +437,47 @@ test('unconfirmed result shows eight bottom cards and score panel without a moda
  b.run('acceptSnapshot(fixture)');assert.equal(b.element('resultOverlay').hidden,false);
 });
 
+test('the banker can confirm immediately when their last play completes the hand',async()=>{
+ for(const mode of ['pve','pvp'])for(const phase of ['round_end','match_end']){
+  const b=browser(),playing=playingSnapshot();playing.mode=mode;sit(b,playing);
+  const completed=ending();completed.mode=mode;completed.version=5;completed.state.phase=phase;
+  completed.state.hand=[];completed.state.result.banker=0;
+  completed.settlement={...completed.settlement,banker:0,round:1,can_confirm:true};
+  const submitting=b.run("act({type:'play',cards:[1]})");
+  latest(b,'/api/action').reply(completed);await submitting;
+  assert.equal(b.get('busy'),false);assert.equal(b.element('confirmResultButton').hidden,false);
+  assert.equal(b.element('confirmResultButton').disabled,false);
+  const confirming=b.element('confirmResultButton').onclick();
+  const request=latest(b,'/api/confirm-result');assert.ok(request);
+  assert.equal(JSON.parse(request.options.body).round,1);
+  assert.equal(b.element('confirmResultButton').disabled,true);
+  request.reply({...completed,version:6,settlement:{...completed.settlement,confirmed:true}});await confirming;
+  assert.equal(b.element('resultOverlay').hidden,false);
+ }
+});
+
+test('a polled settlement remains confirmable after the final action response is lost',async()=>{
+ const b=browser();sit(b,playingSnapshot());
+ const submitting=b.run("act({type:'play',cards:[1]})");
+ const completed=ending();completed.version=5;completed.state.result.banker=0;
+ completed.settlement={...completed.settlement,banker:0,round:1,can_confirm:true};
+ b.context.fixture=completed;b.run('acceptSnapshot(fixture)');
+ assert.equal(b.element('confirmResultButton').disabled,true);
+ latest(b,'/api/action').reply({message:'response lost'},503);await submitting;
+ assert.equal(b.get('busy'),false);assert.equal(b.element('confirmResultButton').disabled,false);
+ assert.equal(b.requests.filter(r=>r.url==='/api/action').length,1);
+});
+
+test('a failed settlement confirmation can be retried without leaving its button disabled',async()=>{
+ const b=browser(),data=ending();data.settlement={...data.settlement,round:1,can_confirm:true};sit(b,data);
+ const first=b.element('confirmResultButton').onclick();
+ latest(b,'/api/confirm-result').reply({message:'temporary network error'},503);await first;
+ assert.equal(b.get('busy'),false);assert.equal(b.element('confirmResultButton').disabled,false);
+ const retry=b.element('confirmResultButton').onclick();
+ latest(b,'/api/confirm-result').reply({...data,version:5,settlement:{...data.settlement,confirmed:true}});await retry;
+ assert.equal(b.element('resultOverlay').hidden,false);
+});
+
 test('banker confirmation response after leaving cannot restore a completed table',async()=>{
  const b=browser(),data=ending();data.settlement.can_confirm=true;sit(b,data);
  const confirming=b.element('confirmResultButton').onclick();
@@ -505,11 +546,13 @@ test('Enter in the rules dialog does not submit selected cards',()=>{
  assert.equal(latest(b,'/api/action'),undefined);
 });
 test('failed leave retains the seat and clears the pending busy state',async()=>{
- const b=browser();sit(b);b.run('busy=true');
+ const b=browser(),data=ending();data.settlement.can_confirm=true;sit(b,data);b.run('busy=true;renderSettlement()');
+ assert.equal(b.element('confirmResultButton').disabled,true);
  const leaving=b.element('leaveButton').onclick();
  latest(b,'/api/leave').reply({message:'unavailable'},503);await leaving;
  assert.equal(b.get('token'),'token_one');assert.equal(b.get('busy'),false);
  assert.equal(b.element('leaveButton').disabled,false);
+ assert.equal(b.element('confirmResultButton').disabled,false);
 });
 
 test('following with singles is not described as a throw attempt',async()=>{
