@@ -24,6 +24,9 @@ const seatDirections=['南','西','北','东'];
 let publicURL='', remembered=null;
 let loadedRelease='';
 let recordBusy=false,feedScope='',feedHTML='';
+// Distinct per document (also for duplicated tabs); the seat token survives a refresh.
+const pageId=globalThis.crypto?.randomUUID?.()||'page_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
+let pageClosing=false;
 const invitedRoom=new URLSearchParams(location.search).get('room');
 try{remembered=JSON.parse(localStorage.getItem('tractor_resume')||'null');}catch{}
 if(!remembered||typeof remembered.token!=='string'||typeof remembered.room!=='string')remembered=null;
@@ -41,7 +44,7 @@ async function api(path,data){
  // retry a POST automatically: it may already have been accepted upstream.
  const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),60000);
  try{
-  const response=await fetch(path,{method:data===undefined?'GET':'POST',headers:{...(data===undefined?{}:{'Content-Type':'application/json'}),...(token?{'Authorization':'Bearer '+token}:{})},body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal});
+  const response=await fetch(path,{method:data===undefined?'GET':'POST',headers:{'X-Tractor-Page':pageId,...(data===undefined?{}:{'Content-Type':'application/json'}),...(token?{'Authorization':'Bearer '+token}:{})},body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal});
   const release=response.headers?.get?.('X-Tractor-Release');
   if(release&&loadedRelease&&release!==loadedRelease)toast('牌桌服务已更新。刷新页面可使用新版界面，座位和牌局会保留。');
   if(release)loadedRelease=release;
@@ -51,6 +54,19 @@ async function api(path,data){
  }finally{clearTimeout(timeout);}
 }
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,3500);}
+function renderNavigation(){
+ const host=$(innerWidth>1150?'tableNavDesktop':'tableNavMobile');
+ if($('tableNavigation').parentElement!==host)host.appendChild($('tableNavigation'));
+}
+function closePage(){
+ if(pageClosing||!token)return;
+ pageClosing=true;pollGeneration++;validationTicket++;clearTimeout(autoTimer);clearTimeout(biddingTimer);
+ const body=JSON.stringify({token,page_id:pageId});
+ try{if(navigator.sendBeacon?.('/api/pagehide',new Blob([body],{type:'application/json'})))return;}catch{}
+ // Best effort only: server-side heartbeat expiry also handles crashes and
+ // offline phones, for which the browser cannot deliver an unload notice.
+ try{fetch('/api/pagehide',{method:'POST',headers:{'Content-Type':'application/json'},body,keepalive:true}).catch(()=>{});}catch{}
+}
 function nameOf(seat){return seat==null?snap?.name||'待选座':snap?.players[seat]?.name||`${seat} 座`;}
 function position(seat){return ['south','west','north','east'][(seat-(snap?.mode==='self'?0:snap?.seat||0)+4)%4];}
 function isTakeover(){return mode==='pvp'&&!!snap?.takeover;}
@@ -336,9 +352,11 @@ function acceptSnapshot(data){
  const previous=snap;
  if(previous?.room!==data.room){tentativeSeat=null;roomManagerOpen=false;}
  snap=data;mode=snap.mode;
+ renderNavigation();
  notifyBids(previous);
  notifyPlays(previous);
  $('table').classList.toggle('self-view',mode==='self');
+ $('table').classList.toggle('burying',snap.state?.phase==='burying');
  $('setupOverlay').hidden=true;$('leaveButton').hidden=false;
  $('inviteButton').hidden=mode!=='pvp';
  $('roomSeatsButton').hidden=mode!=='pvp';
@@ -461,12 +479,14 @@ function scheduleAutoDeal(){
  autoTimer=timer;
 }
 async function poll(generation){
+ let fresh=true;
  while(token&&generation===pollGeneration){
-  try{const data=await api(`/api/state?since=${snap?.version??-1}&wait=4`);if(generation!==pollGeneration)return;if(!snap||data.version!==snap.version)acceptSnapshot(data);$('connection').textContent=mode==='pvp'?`房间 ${data.room}`:'已连接 · 在线牌桌';}
+  try{const data=await api(`/api/state?since=${snap?.version??-1}&wait=4`);if(generation!==pollGeneration)return;if(fresh||!snap||data.version!==snap.version)acceptSnapshot(data);fresh=false;$('connection').textContent=mode==='pvp'?`房间 ${data.room}`:'已连接 · 在线牌桌';}
   catch(e){if(generation!==pollGeneration)return;if(e.code==='SESSION'){forgetSeat(token);resetUI();toast('会话已结束，请重新入座');return;}$('connection').textContent='连接中…';await new Promise(r=>setTimeout(r,1500));}
  }
 }
 function resetUI(){
+ pageClosing=false;
  clearPlayNotices();
  pollGeneration++;validationTicket++;token=null;sessionStorage.removeItem('tractor_session');snap=null;selected.clear();busy=false;$('passButton').disabled=false;autoDeal=false;clearTimeout(autoTimer);autoTimer=null;autoDrawKey='';autoDrawDue=0;
  clearTimeout(biddingTimer);biddingEndAt=0;
@@ -475,7 +495,7 @@ function resetUI(){
  takeoverBusy=false;$('autoplayButton').disabled=false;
  recordBusy=false;feedScope=feedHTML='';$('tableTools').hidden=true;$('feedOverlay').hidden=true;
  drawTurnKey=drawHandKey='';visibleDraw=null;
- clearTimeout(bidNoticeTimer);$('bidNotice').hidden=true;$('settlementPanel').hidden=$('settlementBottom').hidden=true;$('table').classList.toggle('reviewing',false);$('kittyArea').hidden=false;
+ clearTimeout(bidNoticeTimer);$('bidNotice').hidden=true;$('settlementPanel').hidden=$('settlementBottom').hidden=true;$('table').classList.toggle('reviewing',false);$('table').classList.toggle('burying',false);$('kittyArea').hidden=false;
  $('setupOverlay').hidden=false;$('lobbyOverlay').hidden=true;$('resultOverlay').hidden=true;$('leaveButton').hidden=true;$('inviteButton').hidden=true;$('inviteOverlay').hidden=true;
  for(const id of ['passButton','randomButton','autoDealButton','autoplayButton'])$(id).hidden=true;
  for(const id of ['playersLayer','playsLayer','hand','kittyArea','roomInfo'])$(id).innerHTML='';
@@ -542,9 +562,12 @@ $('closeRules').onclick=()=>$('rulesOverlay').hidden=true;
   finally{if(currentSession(scope)){recordBusy=false;$('recordPlaysInput').disabled=false;}}
  };
 document.addEventListener('keydown',e=>{if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;if(e.key==='Escape'){$('rulesOverlay').hidden=true;$('inviteOverlay').hidden=true;$('feedOverlay').hidden=true;selected.clear();if(snap?.started&&snap.state){roomManagerOpen=false;renderLobby();syncSelection();validateSelection();}return;}if(!['rulesOverlay','inviteOverlay','resultOverlay','setupOverlay','lobbyOverlay','feedOverlay'].every(id=>$(id).hidden))return;if(e.key==='Enter'&&!$('submitButton').disabled){e.preventDefault();$('submitButton').click();}});
-window.addEventListener('resize',()=>{if(snap?.started&&snap.state){syncDrawHighlight();renderHand();renderPlays();renderFeed();}});
+window.addEventListener('resize',()=>{renderNavigation();if(snap?.started&&snap.state){syncDrawHighlight();renderHand();renderPlays();renderFeed();}});
+window.addEventListener('pagehide',closePage);
+window.addEventListener('pageshow',event=>{if(!event.persisted||!pageClosing)return;pageClosing=false;busy=takeoverBusy=recordBusy=seatBusy=false;$('passButton').disabled=$('autoplayButton').disabled=false;if(token)poll(++pollGeneration);});
 if(typeof ResizeObserver==='function')new ResizeObserver(()=>{if(snap?.started&&snap.state)layoutHand();}).observe($('hand'));
 renderTeam('teamA',0);renderTeam('teamB',1);
+renderNavigation();
 api('/api/site').then(site=>publicURL=site.public_url||'').catch(()=>{});
 if(invitedRoom&&/^[A-Za-z0-9_-]{3,24}$/.test(invitedRoom)){$('roomInput').value=invitedRoom;chooseMode('pvp');$('inviteNotice').textContent='你收到房间 '+invitedRoom+' 的邀请，填写名字并确认座位即可入座。';$('inviteNotice').hidden=false;if(remembered?.room!==invitedRoom)token=null;}
 else if(!['localhost','127.0.0.1','::1'].includes(location.hostname))chooseMode('pvp');

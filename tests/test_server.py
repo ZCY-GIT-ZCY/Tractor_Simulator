@@ -277,6 +277,7 @@ class RoomAPI(unittest.TestCase):
                 room.can_act(clients[0]['token'], {'type': 'pass'})
             self.assertEqual(error.exception.code, 'PAUSED')
             self.assertEqual(before, room.env.export_state())
+            room.check(clients[3]['token'])  # HTTP transport records the reconnect.
             room.snapshot(clients[3]['token'])
             self.assertFalse(room.paused)
             del room.clients[clients[3]['token']]

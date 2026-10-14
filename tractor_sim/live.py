@@ -22,6 +22,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from .checkpoint import private_json
+from .server import ROOM_IDLE_SECONDS
 
 PROTOCOL = 1
 UPDATE_TIMEOUT = 35
@@ -241,7 +242,7 @@ class Gateway(ThreadingHTTPServer):
             release = stage_release(self.source, self.operations)
             initial = self.operations / 'initial.json'
             private_json(initial, {'schema': 1, 'clock': time.monotonic(), 'rooms': [],
-                                   'max_rooms': 32, 'idle_seconds': 7200})
+                                   'max_rooms': 32, 'idle_seconds': ROOM_IDLE_SECONDS})
             self.worker = Worker(release, self.operations, initial, self.instance_id,
                                  self.history, self.public_entry)
             self.worker.control('resume')

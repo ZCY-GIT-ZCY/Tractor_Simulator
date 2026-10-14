@@ -8,7 +8,7 @@ const vm = require('node:vm');
 // Run the real UI controller against a minimal DOM and a delayed HTTP transport.
 // Responses are deliberately delivered after leaving/joining another session.
 function browser(initialToken = null, saved = null) {
- const elements = new Map(), requests = [], listeners = new Map(), timers = new Map();let timerId=0;
+ const elements = new Map(), requests = [], listeners = new Map(), timers = new Map(), beacons=[];let timerId=0;
  function element(id) {
   if (!elements.has(id)) elements.set(id, {id, hidden:true, disabled:false, value:'0', checked:true,
    dataset:{}, style:{setProperty(){}}, classList:{toggle(){}}, clientWidth:900,
@@ -28,7 +28,7 @@ function browser(initialToken = null, saved = null) {
  const context = vm.createContext({Date:ClockDate,document:{getElementById:element, querySelectorAll(){return [];},
   addEventListener:(event,fn)=>listeners.set(event,fn)}, sessionStorage,localStorage,
   location:{search:'',origin:'http://127.0.0.1:8765',hostname:'127.0.0.1'},
-  window:{addEventListener:(event,fn)=>listeners.set('window:'+event,fn)}, navigator:{}, innerWidth:1280,
+  window:{addEventListener:(event,fn)=>listeners.set('window:'+event,fn)}, navigator:{sendBeacon:(url,body)=>{beacons.push({url,body});return true;}}, Blob, innerWidth:1280,
   getComputedStyle(){return {getPropertyValue:key=>({'--table-scale':'1.6','--table-card-base-width':context.innerWidth<=760?'32px':'44px'}[key]??'')};},
   URL,URLSearchParams,AbortController, setTimeout(fn,delay){const id=++timerId;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);},
   TractorHandOrder:{sort:cards=>cards.slice()},TractorDrawPreview:require('../web/draw-preview.js'),TractorHandLayout:require('../web/hand-layout.js'),
@@ -43,7 +43,7 @@ function browser(initialToken = null, saved = null) {
  // Poll transport is covered by the Python HTTP tests; keep these tests focused
  // on the competing action, leave, bootstrap and resume promises.
  vm.runInContext('poll=async()=>{}',context);
- return {context,element,requests,listeners,timers,sessionStorage,localStorage,advanceTime:ms=>{now+=ms;},
+ return {context,element,requests,listeners,timers,beacons,sessionStorage,localStorage,advanceTime:ms=>{now+=ms;},
   run:code=>vm.runInContext(code,context),get:code=>vm.runInContext(code,context)};
 }
 function snapshot(room='room_one',token='token_one') {
@@ -60,6 +60,54 @@ function sit(browser,data=snapshot()) {
  browser.run('token=fixture.token;acceptSnapshot(fixture);rememberSeat()');
 }
 function latest(browser,path){return browser.requests.findLast(r=>r.url===path);}
+
+test('pagehide reports this page once without relinquishing the seat or resume token',async()=>{
+ const b=browser();sit(b);const before=b.get('pollGeneration');
+ b.listeners.get('window:pagehide')({persisted:false});
+ b.listeners.get('window:pagehide')({persisted:false});
+ assert.equal(b.beacons.length,1);assert.equal(b.beacons[0].url,'/api/pagehide');
+ assert.deepEqual(JSON.parse(await b.beacons[0].body.text()),{token:'token_one',page_id:b.get('pageId')});
+ assert.equal(b.get('pollGeneration'),before+1);
+ assert.equal(b.get('token'),'token_one');
+ assert.equal(JSON.parse(b.localStorage.getItem('tractor_resume')).token,'token_one');
+ assert.equal(latest(b,'/api/leave'),undefined);
+});
+
+test('failed beacon falls back to a keepalive request with no secret in the URL',()=>{
+ const b=browser();sit(b);b.context.navigator.sendBeacon=()=>false;
+ b.listeners.get('window:pagehide')({});
+ const request=latest(b,'/api/pagehide');assert.ok(request);assert.equal(request.options.keepalive,true);
+ assert.equal(JSON.parse(request.options.body).token,'token_one');
+ assert.equal(request.options.headers['Content-Type'],'application/json');
+});
+
+test('returning from browser page cache resumes polling and clears interrupted busy state',()=>{
+ const b=browser();sit(b);b.run('busy=takeoverBusy=recordBusy=seatBusy=true');
+ b.listeners.get('window:pagehide')({persisted:true});
+ b.run('poll=async generation=>{window.resumedGeneration=generation;}');
+ b.listeners.get('window:pageshow')({persisted:true});
+ assert.equal(b.get('pageClosing'),false);assert.equal(b.get('busy||takeoverBusy||recordBusy||seatBusy'),false);
+ assert.equal(b.context.window.resumedGeneration,b.get('pollGeneration'));
+ assert.equal(b.get('token'),'token_one');
+});
+
+test('after explicit leave, closing the page does not send another session notification',async()=>{
+ const b=browser();sit(b);const leaving=b.element('leaveButton').onclick();
+ latest(b,'/api/leave').reply({ok:true});await leaving;
+ b.listeners.get('window:pagehide')({});assert.equal(b.beacons.length,0);
+});
+
+test('every authenticated request registers its own page and navigation moves at narrow widths',async()=>{
+ const b=browser();sit(b);
+ assert.equal(b.element('tableNavigation').parentElement,b.element('tableNavDesktop'));
+ b.context.innerWidth=1000;b.listeners.get('window:resize')();
+ assert.equal(b.element('tableNavigation').parentElement,b.element('tableNavMobile'));
+ b.context.innerWidth=1280;b.listeners.get('window:resize')();
+ assert.equal(b.element('tableNavigation').parentElement,b.element('tableNavDesktop'));
+ const promise=b.run("api('/api/state')"),request=latest(b,'/api/state');
+ assert.equal(request.options.headers['X-Tractor-Page'],b.get('pageId'));
+ assert.equal(request.options.headers.Authorization,'Bearer token_one');request.reply(snapshot());await promise;
+});
 
 test('only the latest own drawn physical card is highlighted; it persists until the next own draw',()=>{
  const b=browser(),data=snapshot();

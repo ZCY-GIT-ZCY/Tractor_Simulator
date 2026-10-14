@@ -10,7 +10,7 @@ from test_rules import c, fixture
 
 
 class EmptyRoom(unittest.TestCase):
-    def test_last_human_leaves_ai_finishes_one_hand_and_room_reopens(self):
+    def test_last_human_leaves_stops_ai_and_abandoned_room_is_reclaimed(self):
         with tempfile.TemporaryDirectory() as folder:
             registry = Registry(policy_factory=RandomPolicy, history_dir=Path(folder))
             clients = [registry.enter({'mode': 'pvp', 'room': 'last_leave', 'name': str(i)}) for i in range(4)]
@@ -26,16 +26,18 @@ class EmptyRoom(unittest.TestCase):
             worker = threading.Thread(target=registry.run_bots, daemon=True)
             worker.start()
             try:
-                deadline = time.monotonic() + 5
-                while room.env.phase != 'round_end' and time.monotonic() < deadline: time.sleep(.02)
-                self.assertEqual(room.env.phase, 'round_end')
-                self.assertEqual(len(room.env.action_log), 4)
+                time.sleep(.15)
+                self.assertEqual(room.env.phase, 'playing')
+                self.assertEqual(len(room.env.action_log), 0)
+                with room.condition: room.vacant_since -= 5
+                registry.prune()
+                self.assertNotIn(room.code, registry.rooms)
                 newcomer = registry.enter({'mode': 'pvp', 'room': 'last_leave', 'name': 'New'})
-                with room.condition:
-                    room.confirm_seat(newcomer['token'], 2)
-                    self.assertEqual(room.host, newcomer['token'])
-                    self.assertEqual(room.env.round_no, 1)
-                    self.assertFalse(room.clients[newcomer['token']]['takeover'])
-                    self.assertNotIn(2, room.ai_seats)
+                new_room = registry.lookup(newcomer['token'])
+                self.assertIsNot(new_room, room)
+                with new_room.condition:
+                    new_room.confirm_seat(newcomer['token'], 2)
+                    self.assertEqual(new_room.host, newcomer['token'])
+                    self.assertFalse(new_room.clients[newcomer['token']]['takeover'])
             finally:
                 registry.stopped.set(); worker.join(5)

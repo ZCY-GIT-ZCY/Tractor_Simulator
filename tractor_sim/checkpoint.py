@@ -19,9 +19,10 @@ ROOM_FIELDS = (
     'policy_error_actor', 'version', 'diagnostic_revision', 'updated',
     'next_bot_at', 'bidding_deadline', 'bidding_paused_at', 'ai_name', 'ai_id',
     'review_confirmations', 'review_ai_banker', 'trick_review_until', 'record_plays',
+    'vacant_since', 'retired',
 )
 CLOCK_FIELDS = ('review_started', 'updated', 'next_bot_at',
-                 'bidding_deadline', 'bidding_paused_at', 'trick_review_until')
+                 'bidding_deadline', 'bidding_paused_at', 'trick_review_until', 'vacant_since')
 
 
 def tuples(value):
@@ -73,6 +74,12 @@ def shift_clocks(room, seconds):
             setattr(room, field, getattr(room, field) + seconds)
     for client in room.clients.values():
         client['seen'] += seconds
+        if 'legacy_seen' in client:
+            client['legacy_seen'] += seconds
+        for page in client.get('pages', {}).values():
+            page['seen'] += seconds
+            if page['closed_at'] is not None:
+                page['closed_at'] += seconds
     if room.recording:
         room.recording.clock += seconds
 
@@ -144,6 +151,8 @@ def load_registry(registry, document):
     with registry.lock:
         registry.rooms, registry.tokens = rooms, tokens
         registry.max_rooms = document['max_rooms']
-        registry.idle_seconds = document['idle_seconds']
+        # Older workers used a two-hour room expiry. Apply the new upper bound
+        # even when restoring their checkpoints during a live replacement.
+        registry.idle_seconds = min(registry.idle_seconds, document['idle_seconds'])
         registry.frozen_at = restored_at
         registry.frozen.set()

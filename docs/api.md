@@ -99,8 +99,9 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 | `POST /api/room/record-plays` | `{enabled:true|false}` | 房主统一开关右侧动态中的逐手记牌，默认关闭；不改变裁判、AI 可知历史或完整回放保存 |
 | `POST /api/autoplay` | `{enabled:true|false}` | self 四家随机托管 / PVE 四家 Enoch 托管；PVP 只开关请求者本人座位的 Enoch AI 托管 |
 | `POST /api/leave` | `{}` | `{ok:true}`，PVP 真人席位自动变为 AI；释放原会话，可安全重试 |
+| `POST /api/pagehide` | `{token,page_id}` | 尽力通知该会话已登记的网页关闭，不释放个人席位；可安全重试 |
 | `GET /api/health` | 无 | `{ok:true,schema_version:1,service:"tractor_sim",bind_host:监听地址,instance_id:进程随机标识,pve_ai:"enoch-table-v1"}` |
-| `GET /api/site` | 无 | `{public_url:HTTPS入口或null,disconnect_seconds:25,room_idle_seconds:7200}` |
+| `GET /api/site` | 无 | `{public_url:HTTPS入口或null,disconnect_seconds:25,room_idle_seconds:60,page_close_grace_seconds:5}` |
 | `GET /rules` | 无 | 唯一规则文件 UTF-8 文本 |
 
 网页辅助动作 `{"type":"random"}` 仅 /api/action 识别，表示让当前座位执行随机策略的一步；仅 self/PVE 可以使用，PVP 的真人自行选择行动，AI 席位由服务器执行策略。Python 核心 step 不接受 random。
@@ -115,7 +116,11 @@ PVP 房间号 3..24 位 ASCII 字母、数字、下划线或短横线，区分�
 
 PVP 新会话只在开局前或 `round_end` 局间接纳，`dealing/final_bidding/burying/countering/playing` 返回 `IN_PROGRESS`，四席均为真人返回 `ROOM_FULL`，`match_end` 返回 `MATCH_FINISHED`。已入房但未选座者也须在确认时重新检查阶段；预选 AI 不预留席位，两人同时确认同一 AI 席位只接受一个。托管真人仍是该真人所有的席位，不能被新人接替。补位不重置环境、级别、庄家、底牌或结算核对状态。
 
-快照新增 `seat_selection_open`（当前允许确认座位）、`between_rounds`（局间）。主动离开和网络断线分开处理：离开自动转为 AI，昵称保留为“原昵称（AI 接替）”，旧凭据立即失效；断线仍保留原席，未托管真人离线 25 秒暂停。房主离开优先移交在座真人。庄家离开后由 AI 按原有六秒底牌展示流程确认。最后一个真人离开时四个 AI 打完本局即停，不会自行开始下一局；局间可以重新加入接替 AI，整房无人使用两小时后回收。
+快照新增 `seat_selection_open`（当前允许确认座位）、`between_rounds`（局间）。主动离开和网络断线分开处理：离开自动转为 AI，昵称保留为“原昵称（AI 接替）”，旧凭据立即失效；断线仍保留原席，未托管真人离线 25 秒暂停。房主离开优先移交在座真人。庄家离开后由 AI 按原有六秒底牌展示流程确认。
+
+多人／PVE 房最后一个真人网页停止活动满 60 秒后，回收整房及会话；只要还有真人网页在线（含候场和全部开启 AI 托管的真人），就不回收。AI 动作、牌局更新和托管状态不会延长寿命。自对弈开启四 AI 托管的观战房、或仅有四个 AI 席位的多人房，在所有观战网页关闭后停止继续调度 AI，保留 5 秒刷新重连窗口，随后回收；若浏览器崩溃、关机或断网使关闭通知丢失，25 秒无心跳也会回收。已保存回放不删除，未完成牌局随房间释放。
+
+网页每次加载生成独立 `page_id`，通过 `X-Tractor-Page` 请求头登记／更新活动时间；同一会话开多个标签页时，各自独立跟踪。`pagehide` 用 `sendBeacon` 发送 JSON，因其无法设置认证头，仅此端点允许将会话凭据放在请求体；其他端点仍只接受 Bearer 认证，凭据不得放进 URL。关闭旧标签页不能关闭新标签页，等待中的长轮询返回也不能复活已关闭的网页。刷新／浏览器返回会恢复心跳；未支持此头的旧客户端使用会话心跳兜底。在线更新的 checkpoint 保留这些状态并调整时钟，旧版本两小时过期设置自动收紧至一分钟。
 
 选座与房间配置接口在房间锁下原子处理，无须全局 version，以免不同席位同时确认互相干扰。同席竞争只允许一人成功。已确认者须先取消才能改座；开局后 cancel 返回 `SEATS_LOCKED`。开局后不能移除 AI 或覆盖任何已确认真人（包括离线真人），但真人主动离开的空席可由新人确认或房主补 AI，使用该席现有手牌继续。AI 与 PVE 共用本地策略运行池，每席仅接收自己的观察并经过同一规则裁判。新一局只有房主可以触发，普通出牌只能是自己座位。网络重试先取快照、核对 version，再提交；避免自动重复出牌。
 
@@ -125,7 +130,7 @@ PVP 新会话只在开局前或 `round_end` 局间接纳，`dealing/final_biddin
 
 `FOLLOW_SUIT` / `FOLLOW_STRUCTURE` 的失败选牌另存服务端私有 `runtime/diagnostics/validation-errors-日期.jsonl`（自定义 history_dir 时在其父目录的 diagnostics 下）。包含房间、版本、轮次、裁判级牌与主花色、公开领出、本人的手牌与选择，以及页面所报级牌／主花色；不含凭据、其他手牌和底牌。每次环境修订去重，最多存 32 种选择；文件不通过静态或历史 API 发布。保存失败不影响校验或游戏状态。正式对局回放仍仅记录已接受动作。
 
-默认最多 32 个房间，达到上限返回 422 ROOM_LIMIT；仍可加入未满的现有房间。全体客户端两小时未访问则统一释放该房间及 token，单家断线不释放座位。请求读取超时 20 秒，最大 160 个同时处理的 HTTP 请求。公网启动器将入口传给 site；邀请链接在本机访问时也可复制为公网入口。
+默认最多 32 个房间，达到上限返回 422 ROOM_LIMIT；仍可加入未满的现有房间。多人／PVE 全体真人一分钟无活动则统一释放房间及 token，四 AI 观战房按上述更短期限回收；仍有人在线时，单家断线不释放座位。请求读取超时 20 秒，最大 160 个同时处理的 HTTP 请求。公网启动器将入口传给 site；邀请链接在本机访问时也可复制为公网入口。
 
 ## 不包含的功能
 

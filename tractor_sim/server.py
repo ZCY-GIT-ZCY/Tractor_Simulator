@@ -25,7 +25,8 @@ from .cards import points
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 DISCONNECT_SECONDS = 25
-ROOM_IDLE_SECONDS = 2 * 60 * 60
+ROOM_IDLE_SECONDS = 60
+PAGE_CLOSE_GRACE_SECONDS = 5
 AI_REVIEW_SECONDS = 6
 AI_TRICK_REVIEW_SECONDS = 2
 BIDDING_GRACE_SECONDS = 6
@@ -69,6 +70,8 @@ class Room:
         self.diagnostic_revision = None
         self.diagnostic_keys = set()
         self.updated = time.monotonic()
+        self.vacant_since = self.updated
+        self.retired = False
         self.next_bot_at = time.monotonic() + 0.4
         self.bidding_window_key = None
         self.bidding_deadline = None
@@ -289,6 +292,7 @@ class Room:
                     raise IllegalAction("ROOM_FULL", "房间已满，请换房间号")
             token = secrets.token_urlsafe(32)
             self.clients[token] = {"seat": seat, "name": name[:24], "seen": time.monotonic(), "takeover": False}
+            self.vacant_since = None
             if self.host is None:
                 self.host = token
             self.refresh_pause()
@@ -316,6 +320,8 @@ class Room:
         client = self.check(token)
         seat = client["seat"]
         del self.clients[token]
+        if not self.clients:
+            self.vacant_since = time.monotonic()
         if seat is not None:
             self.invalidate_policy_control({seat})
             if self.mode == "pvp":
@@ -470,11 +476,63 @@ class Room:
         self.refresh_pause(); self.bump()
         self.next_bot_at = time.monotonic() + 0.4
 
-    def check(self, token):
-        if token not in self.clients:
+    def check(self, token, page_id=None, touch=True, browser_request=False):
+        if self.retired or token not in self.clients:
             raise IllegalAction("SESSION", "会话已失效，请重新进入")
-        self.clients[token]["seen"] = time.monotonic()
-        return self.clients[token]
+        client = self.clients[token]
+        if touch:
+            now = time.monotonic()
+            client['seen'] = now
+            if page_id:
+                pages = client.setdefault('pages', {})
+                # A refreshed or duplicated tab gets a new page identity. Bound
+                # old identities without letting one closing tab evict another.
+                if page_id not in pages and len(pages) >= 64:
+                    oldest = min(pages, key=lambda p: pages[p]['seen'])
+                    del pages[oldest]
+                pages[page_id] = {'seen': now, 'closed_at': None}
+            elif browser_request:
+                client['legacy_seen'] = now
+        return client
+
+    def close_page(self, token, page_id):
+        """A beacon closes only its own registered page, never the player's seat."""
+        client = self.check(token, touch=False)
+        page = client.get('pages', {}).get(page_id)
+        if page is not None and page['closed_at'] is None:
+            page['closed_at'] = time.monotonic()
+            self.condition.notify_all()
+
+    def presence(self, now):
+        """Only browser traffic counts as activity; AI turns cannot keep rooms alive."""
+        latest = 0 if self.clients else (self.vacant_since if self.vacant_since is not None else self.updated)
+        online = False
+        all_closed = True
+        for client in self.clients.values():
+            pages = client.get('pages')
+            if pages:
+                for page in pages.values():
+                    latest = max(latest,
+                                 page['closed_at'] if page['closed_at'] is not None else page['seen'])
+                    if page['closed_at'] is None:
+                        all_closed = False
+                        online |= now - page['seen'] < DISCONNECT_SECONDS
+                if 'legacy_seen' in client:
+                    latest = max(latest, client['legacy_seen'])
+                    if now - client['legacy_seen'] < DISCONNECT_SECONDS:
+                        online = True
+                        all_closed = False
+            else:
+                latest = max(latest, client['seen'])
+                all_closed = False
+                online |= now - client['seen'] < DISCONNECT_SECONDS
+        return latest, online, all_closed
+
+    def ai_only(self):
+        # A human PVE/PVP chair remains a human even when entrusted to AI.
+        return (self.mode == 'self' and self.autoplay or
+                self.mode == 'pvp' and len(self.ai_seats) == 4 and
+                not any(c['seat'] is not None for c in self.clients.values()))
 
     def refresh_pause(self):
         """Check connectivity under the room lock, including between bot ticks."""
@@ -489,7 +547,8 @@ class Room:
             self.bump()
 
     def snapshot(self, token):
-        client = self.check(token)
+        # A long poll completing after pagehide must not resurrect that page.
+        client = self.check(token, touch=False)
         self.refresh_pause()
         self.close_bidding_if_due()
         players = []
@@ -574,17 +633,23 @@ class Registry:
         self.idle_seconds = idle_seconds
 
     def prune(self):
-        """Only expire rooms whose entire membership has stopped polling."""
+        """Expire abandoned rooms, independent of AI progress or takeover settings."""
         now = time.monotonic()
         with self.lock:
             if self.frozen.is_set():
                 return
             for code, room in list(self.rooms.items()):
                 with room.condition:
-                    expired = (now - max(c["seen"] for c in room.clients.values()) > self.idle_seconds
-                               if room.clients else now - room.updated >
-                               (self.idle_seconds if room.mode == 'pvp' else 60))
+                    latest, online, all_closed = room.presence(now)
+                    delay = (PAGE_CLOSE_GRACE_SECONDS if all_closed else DISCONNECT_SECONDS) if room.ai_only() else self.idle_seconds
+                    expired = not online and now - latest >= delay
                     if expired:
+                        room.retired = True
+                        room.invalidate_policy_control(set(range(4)))
+                        if room.pending is not None:
+                            room.pending[0].cancel()
+                            room.pending = None
+                        room.condition.notify_all()
                         for token in room.clients:
                             self.tokens.pop(token, None)
                         del self.rooms[code]
@@ -645,6 +710,14 @@ class Registry:
                         room.leave(token)
                     self.tokens.pop(token, None)
 
+    def close_page(self, token, page_id):
+        # Like leave, duplicate/lost beacons for expired sessions are harmless.
+        with self.lock:
+            room = self.tokens.get(token)
+            if room is not None:
+                with room.condition:
+                    room.close_page(token, page_id)
+
     def run_bots(self):
         # Policy computations never hold a room lock. Keep at most one task per
         # room and validate its revision before applying an asynchronous result.
@@ -692,12 +765,17 @@ class Registry:
 
     def _dispatch_bots(self, pool):
         while not self.stopped.wait(0.05):
+            self.prune()
             with self.lock:
                 rooms = list(self.rooms.values())
             now = time.monotonic()
             for room in rooms:
                 with room.condition:
-                    if self.frozen.is_set():
+                    if self.frozen.is_set() or room.retired:
+                        continue
+                    if room.ai_only() and not room.presence(time.monotonic())[1]:
+                        # Stop unattended simulation immediately, retaining the
+                        # room briefly so a refresh can reconnect.
                         continue
                     room.refresh_pause()
                     room_time = time.monotonic()
@@ -801,6 +879,12 @@ class Handler(BaseHTTPRequestHandler):
         header = self.headers.get("Authorization", "")
         return header[7:] if header.startswith("Bearer ") else ""
 
+    def page_id(self, value=None):
+        value = self.headers.get('X-Tractor-Page', '') if value is None else value
+        if not isinstance(value, str) or value and not re.fullmatch(r'[A-Za-z0-9_-]{8,64}', value):
+            raise ValueError('网页标识无效')
+        return value or None
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if self.server.registry.frozen.is_set() and parsed.path != '/api/health':
@@ -820,7 +904,7 @@ class Handler(BaseHTTPRequestHandler):
                 since = int(q.get("since", [-1])[0])
                 wait = min(5, max(0, float(q.get("wait", [0])[0])))
                 with room.condition:
-                    room.check(token)
+                    room.check(token, self.page_id(), browser_request=True)
                     if since == room.version and wait:
                         room.condition.wait(wait)
                     snapshot = room.snapshot(token)
@@ -829,6 +913,7 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/site":
                 self.json_response({"public_url": self.server.site_public_url(),
                                     "disconnect_seconds": DISCONNECT_SECONDS,
+                                    "page_close_grace_seconds": PAGE_CLOSE_GRACE_SECONDS,
                                     "room_idle_seconds": self.server.registry.idle_seconds}); return
             if parsed.path == "/api/health":
                 self.json_response({"ok": True, "schema_version": 1, "service": "tractor_sim",
@@ -889,14 +974,29 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("请求体须为 JSON 对象")
             path = urlparse(self.path).path
             if path == "/api/session":
-                self.json_response(self.server.registry.enter(data)); return
+                page_id = self.page_id()
+                response = self.server.registry.enter(data)
+                room = self.server.registry.lookup(response['token'])
+                with room.condition:
+                    room.check(response['token'], page_id, browser_request=True)
+                self.json_response(response); return
+            if path == '/api/pagehide':
+                # sendBeacon cannot set an Authorization header. This is the
+                # only endpoint accepting the bearer secret in its JSON body;
+                # it can mark only a previously registered page as closed.
+                page_id = self.page_id(data.get('page_id', ''))
+                page_token = self.token() or data.get('token')
+                if not isinstance(page_token, str) or not page_token or page_id is None:
+                    raise ValueError('关闭通知须包含会话凭据和网页标识')
+                self.server.registry.close_page(page_token, page_id)
+                self.json_response({'ok': True}); return
             token = self.token()
             if path == "/api/leave":
                 self.server.registry.leave(token)
                 self.json_response({"ok": True}); return
             room = self.server.registry.lookup(token)
             with room.condition:
-                room.check(token)
+                room.check(token, self.page_id(), browser_request=True)
                 room.refresh_pause()
                 action_time = time.monotonic()
                 room.close_bidding_if_due(action_time)
