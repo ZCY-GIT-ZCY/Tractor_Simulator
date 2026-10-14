@@ -132,6 +132,42 @@ test('filtering by level or search shows matching archive entries',async()=>{
  p.element('historyLevel').value='all';p.element('historySearch').value='名字';p.element('historySearch').oninput();
  assert.match(p.element('historyList').innerHTML,/history-card/);
 });
+test('AI decision details follow the replay step and hide on legacy or initial frames',async()=>{
+ const p=page(),data=fixture();
+ data.frames[1].decision={policy_name:'SMV3 <安全>',decision_ms:12.7,
+  search:{worlds:64,candidates:2,work_complete:true},stats_delta:{value_model_rows:128},
+  candidates:[{cards:[1,55],value:0.25,selected:true},{cards:[2],value:-0.5,selected:false}]};
+ await load(p,data);await p.run(`openRecord('${data.meta.id}')`);
+ assert.equal(p.element('replayDecision').hidden,true);
+ p.element('replayNext').onclick();
+ assert.equal(p.element('replayDecision').hidden,false);
+ assert.match(p.element('replayDecision').innerHTML,/SMV3 &lt;安全&gt;/);
+ assert.match(p.element('replayDecision').innerHTML,/13 ms/);
+ assert.match(p.element('replayDecision').innerHTML,/64 个可能局面/);
+ assert.match(p.element('replayDecision').innerHTML,/class="chosen"/);
+ assert.match(p.element('replayDecision').innerHTML,/0\.250/);
+ p.element('replayNext').onclick();assert.equal(p.element('replayDecision').hidden,true);
+ p.element('replayPrev').onclick();assert.equal(p.element('replayDecision').hidden,false);
+ p.element('replayPrev').onclick();assert.equal(p.element('replayDecision').hidden,true);
+});
+test('AI search fallback is displayed without inventing completed search work',()=>{
+ const p=page();p.context.frame={decision:{policy_name:'SMV3',decision_ms:3001,
+  search:{work_complete:false,reason:'budget'},stats_delta:{}}};
+ p.run('renderDecision(frame)');
+ assert.match(p.element('replayDecision').innerHTML,/搜索未完成/);
+ assert.doesNotMatch(p.element('replayDecision').innerHTML,/可能局面/);
+});
+test('a narrow replay hand fits all 35 cards inside the strip',()=>{
+ const p=page(),data=fixture(),styles={};
+ p.context.innerWidth=390;p.context.fixture=data;
+ data.frames[0].state.hands[0]=Array.from({length:35},(_,i)=>i);
+ p.element('replayHand').clientWidth=270;
+ p.element('replayHand').style.setProperty=(key,value)=>styles[key]=value;
+ p.run('record=fixture;clock={index:0};renderHand()');
+ const gap=Number.parseFloat(styles['--overlap'])+53;
+ assert.ok(53+34*gap<=250.00001);
+ assert.equal((p.element('replayHand').innerHTML.match(/role="img"/g)||[]).length,35);
+});
 test('following the active step scrolls only the timeline, never the whole page',async()=>{
  const p=page(),data=await load(p);await p.run(`openRecord('${data.meta.id}')`);
  const calls=[],pageScroll=[];

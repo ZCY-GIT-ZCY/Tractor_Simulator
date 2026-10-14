@@ -140,8 +140,9 @@ function renderHand(){
  const cards=TractorHandOrder.sort(s.hands[seat],s.level,s.trump);
  $('replayHandTitle').textContent=`${nameOf(seat)} · ${cards.length} 张手牌`;
  const width=innerWidth<=760?53:61;
- const gap=Math.max(19,Math.min(width,($('replayHand').clientWidth-width)/Math.max(1,cards.length-1)));
+ const gap=Math.max(1,Math.min(width,($('replayHand').clientWidth-width-20)/Math.max(1,cards.length-1)));
  $('replayHand').style.setProperty('--overlap',`${gap-width}px`);
+ $('replayHand').style.setProperty('--replay-corner-font',`${Math.max(4,Math.min(18,(gap-3)/1.25))}px`);
  $('replayHand').innerHTML=cards.length?cards.map(c=>cardHTML(c,s)).join(''):'<span class="small-empty">手牌已出完</span>';
 }
 function renderSettlement(state){
@@ -149,6 +150,19 @@ function renderSettlement(state){
  const base=state.settlement_kitty?.reduce((sum,c)=>sum+(rank(c)===5?5:[10,13].includes(rank(c))?10:0),0);
  const bottom=base!=null?`${base} × ${r.multiplier} = ${r.bottom}`:`${r.bottom}（×${r.multiplier}）`;
  $('replaySettlement').innerHTML=`<h3>${r.winner?'金队':'青队'}${r.winner===r.banker%2?'守庄成功':'上台坐庄'}</h3><strong>${r.score}</strong> <small>分</small><p>抓分 ${r.captured} · 底分 ${bottom}<br>罚分 ${r.penalty>0?'+':''}${r.penalty}<br>青队 ${label(r.levels_before[0])} → ${label(r.levels_after[0])} &nbsp; 金队 ${label(r.levels_before[1])} → ${label(r.levels_after[1])}${r.downgrade?'<br>'+label(r.level)+' 扣底，庄家退回 '+label(r.downgrade):''}</p>`;
+}
+function renderDecision(frame){
+ const panel=$('replayDecision'),d=frame.decision;panel.hidden=!d;
+ if(!d){panel.innerHTML='';return;}
+ const stats=d.stats_delta||{},search=d.search||{},facts=[];
+ if(Number.isFinite(d.decision_ms))facts.push(`决策耗时 ${d.decision_ms<1?'< 1':Math.round(d.decision_ms)} ms`);
+ if(Number.isFinite(search.worlds))facts.push(`搜索 ${search.worlds} 个可能局面`);
+ if(Number.isFinite(search.candidates))facts.push(`比较 ${search.candidates} 个候选`);
+ if(stats.value_model_rows)facts.push(`价值网络评估 ${stats.value_model_rows} 行`);
+ const choices=Array.isArray(d.candidates)?d.candidates:[];
+ const rows=choices.map(c=>`<tr class="${c.selected?'chosen':''}"><td>${c.selected?'✓ ':''}${cardChips(c.cards||[])}</td><td>${Number.isFinite(c.value)?c.value.toFixed(3):'—'}</td></tr>`).join('');
+ const fallback=search.work_complete===false?'<p class="decision-fallback">本步搜索未完成，使用该策略的备用决策。</p>':'';
+ panel.innerHTML=`<div class="eyebrow">AI DECISION</div><h3>${esc(d.policy_name||d.policy)}</h3><p>${facts.map(esc).join('<br>')}</p>${fallback}${rows?`<details><summary>候选牌与价值评分</summary><div class="decision-candidates"><table><thead><tr><th>候选出牌</th><th>价值</th></tr></thead><tbody>${rows}</tbody></table></div><small>✓ 表示搜索选中的候选；实际出牌以上方行动记录为准。</small></details>`:''}`;
 }
 function updatePlayback(){
  if(!clock||!record)return;
@@ -158,7 +172,7 @@ function updatePlayback(){
  const speed=Number(clock.speed.toFixed(2));$('replaySpeed').value=speed;$('replaySpeedValue').textContent=speed+'×';
  $('replayTiming').textContent=`每 ${Number((1/speed).toFixed(2))} 秒一步`;
  if(renderedIndex===clock.index)return;renderedIndex=clock.index;
- const f=record.frames[clock.index],action=describeFrame(clock.index);renderTable(f);renderSettlement(f.state);
+ const f=record.frames[clock.index],action=describeFrame(clock.index);renderTable(f);renderSettlement(f.state);renderDecision(f);
  $('replayActionTitle').textContent=action.title;$('replayActionDetail').textContent=action.detail;
  $('replayActionCards').innerHTML=action.cards.map(c=>cardHTML(c,f.state)).join('');
  for(const button of $('replayTimeline').querySelectorAll('[data-step]')){
