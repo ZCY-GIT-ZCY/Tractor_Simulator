@@ -124,7 +124,8 @@ function renderTable(f){
   const step=Math.min(cardWidth-18,Math.max(5,(width*(['north','south'].includes(pos)?0.72:0.36)-cardWidth)/Math.max(1,p.cards.length-1)));
   return `<div class="play ${pos} ${declaration?'declaration':''} ${s.trick.length&&i===plays.length-1?'fresh':''} ${winner===p.player?'winner':''}" style="--play-overlap:${step-cardWidth}px">${p.cards.map(c=>cardHTML(c,s)).join('')}${winner===p.player?`<span class="trick-winner">${s.trick.length?'当前最大':'本轮最大'}</span>`:''}${declaration?`<span class="declaration-label">${trumpName(s.trump)} · 已亮牌</span>`:''}</div>`;
  }).join('');
- $('replayTableStatus').textContent=['round_end','match_end'].includes(s.phase)?'本局已结束':s.phase==='playing'?(s.trick.length?`${nameOf(s.current_player)} 须跟 ${s.trick[0].cards.length} 张`:`${nameOf(s.current_player)} 领出`):`${phaseText(s.phase)} · ${nameOf(s.current_player)}`;
+ $('replayTableStatus').textContent=['round_end','match_end'].includes(s.phase)?'本局已结束':s.phase==='playing'?'':`${phaseText(s.phase)} · ${nameOf(s.current_player)}`;
+ $('replayTableStatus').hidden=!$('replayTableStatus').textContent;
  $('replayKitty').innerHTML=s.kitty_public&&s.kitty?.length?`公开底牌<div style="display:flex">${s.kitty.map(c=>cardHTML(c,s)).join('')}</div>`:s.phase==='burying'?'底牌已收入手中':'底牌 · 不明示';
  const ended=['round_end','match_end'].includes(s.phase),bottom=ended?s.settlement_kitty:null;
  $('replayTable').classList.toggle('reviewing',!!bottom);$('replayBottom').hidden=!bottom;$('replayKitty').hidden=!!bottom;
