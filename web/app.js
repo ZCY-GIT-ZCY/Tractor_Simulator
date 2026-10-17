@@ -13,7 +13,7 @@ let mode='self', token=sessionStorage.getItem('tractor_session'), snap=null, sel
 let handKey='', selectionScopeKey='', forcedSelectionKey='', validationTicket=0, pollGeneration=0, closedResult=null, autoDeal=false, autoTimer=null, autoDrawKey='', autoDrawDue=0, toastTimer;
 let previousHands=[new Set(),new Set(),new Set(),new Set()], previousPlay='';
 let drawTurnKey='', drawHandKey='', visibleDraw=null;
-let bidNoticeTimer;
+let bidNoticeTimer,bidRequest=null;
 const playNoticeLabels={throw:'甩牌',ruff:'杀牌',overruff:'盖杀',trump_lead:'调主'};
 const playNotices=new Map(),playNoticeTimers=new Map();
 let playNoticeScope='';
@@ -193,6 +193,14 @@ function renderSettlement(){
 function activeHand(){return displayHand(snap.mode==='self'?snap.state.hands[snap.state.current_player]:snap.state.hand);}
 function dealingComplete(){return snap?.state?.phase==='dealing'&&!!snap.state.bidding_window?.complete;}
 function canBidNow(){return !!snap?.started&&!!snap.state&&!snap.paused&&!isTakeover()&&snap.state.phase==='dealing'&&!!snap.state.realtime_bidding&&(!dealingComplete()||biddingEndAt>Date.now())&&(mode==='self'||snap.controlled.includes(snap.seat));}
+function sameBidScope(request){return !!request&&currentSession(request.scope)&&snap?.room===request.room&&snap.state?.phase==='dealing'&&snap.state.round===request.round&&snap.state.redeals===request.redeals;}
+function bidPending(){return sameBidScope(bidRequest);}
+function advertisedBid(cards){
+ // The referee already sends this seat's legal declarations with every
+ // snapshot. Compare faces so either physical copy can declare a single.
+ const key=cs=>cs.map(face).sort((a,b)=>a-b).join(',');
+ return cards.every(c=>activeHand().includes(c))&&(snap.state.bid_options||[]).some(option=>key(option.cards)===key(cards));
+}
 function updateBiddingCountdown(){
  clearTimeout(biddingTimer);
  if(!dealingComplete())return;
@@ -201,7 +209,7 @@ function updateBiddingCountdown(){
  if(!snap.paused&&remaining<=0){++validationTicket;$('submitButton').disabled=true;return;}
  if(!snap.paused)biddingTimer=setTimeout(updateBiddingCountdown,100);
 }
-function canSelectHand(){return !!snap?.started&&!!snap.state&&!snap.paused&&!busy&&!isTakeover()&&(isMyTurn()&&!['round_end','match_end'].includes(snap.state.phase)||mode!=='self'&&['playing','dealing'].includes(snap.state.phase));}
+function canSelectHand(){return !!snap?.started&&!!snap.state&&!snap.paused&&(!busy||mode!=='self'&&canBidNow())&&!isTakeover()&&(isMyTurn()&&!['round_end','match_end'].includes(snap.state.phase)||mode!=='self'&&['playing','dealing'].includes(snap.state.phase));}
 function toggleCard(c){
  if(!canSelectHand()||!activeHand().includes(c))return;
  if(!snap.state.realtime_bidding){autoDeal=false;clearTimeout(autoTimer);updateAutoDeal();}
@@ -412,6 +420,7 @@ function acceptSnapshot(data){
  $('kittyArea').innerHTML=s.kitty_public&&s.kitty?.length?`公开底牌<div style="display:flex">${s.kitty.map(c=>cardHTML(c)).join('')}</div>`:s.phase==='burying'?'底牌已收入手中':`底牌 · 8 张${s.kitty_owner!=null?'已扣下':''}`;
  $('kittyArea').hidden=false;
  $('passButton').hidden=dealingComplete()||!isMyTurn()||!['dealing','final_bidding','countering'].includes(s.phase);
+ $('passButton').disabled=busy||mode==='self'&&bidPending();
  $('passButton').textContent=s.phase==='dealing'?(s.realtime_bidding?'继续摸牌':'不亮，继续摸牌'):'不反';
  $('autoDealButton').hidden=dealingComplete()||!isMyTurn()||s.phase!=='dealing';updateAutoDeal();
  $('randomButton').hidden=dealingComplete()||!isMyTurn()||!['dealing','final_bidding','countering','burying','playing'].includes(s.phase)||mode==='pvp';
@@ -428,33 +437,60 @@ async function validateSelection(){
  if(!snap?.started||!snap.state)return;
  const s=snap.state;
  const ownBid=s.bid&&s.bid.player===(mode==='self'?s.current_player:snap.seat);
- $('submitButton').innerHTML=(s.phase==='burying'?'确认扣底':['dealing','final_bidding'].includes(s.phase)&&ownBid?'加固':s.phase==='dealing'&&s.realtime_bidding?'亮主 / 反主':['dealing','final_bidding','countering'].includes(s.phase)?'亮牌':['round_end','match_end'].includes(s.phase)?'查看结算':'出牌')+' <span>↗</span>';
+ $('submitButton').innerHTML=(bidPending()?'亮主发送中…':s.phase==='burying'?'确认扣底':['dealing','final_bidding'].includes(s.phase)&&ownBid?'加固':s.phase==='dealing'&&s.realtime_bidding?'亮主 / 反主':['dealing','final_bidding','countering'].includes(s.phase)?'亮牌':['round_end','match_end'].includes(s.phase)?'查看结算':'出牌')+' <span>↗</span>';
  if(['round_end','match_end'].includes(s.phase)){validationUI('本局已结束',snap.settlement&&!snap.settlement.confirmed?'请先核对底牌，等待本局庄家确认':'点击阶段标签查看结算');return;}
  if(isTakeover()){validationUI('AI 托管中','你仍可查看自己的手牌；取消 AI 托管后即可手动操作');return;}
  const realtime=canBidNow();
  if(dealingComplete()&&!snap.paused&&biddingEndAt<=Date.now()){validationUI('实时亮主已结束','等待服务器确定主牌和后续阶段');return;}
  if(!isMyTurn()&&!realtime){if(s.phase==='countering'&&ownBid){validationUI('当前主由你确定，不能反自己','本轮不询问你；其他人反主并扣底后，将按新主重新轮询');return;}validationUI(snap.paused?'等待重新连接':['playing','dealing'].includes(s.phase)&&selected.size?`已预选 ${selected.size} 张 · 等待轮到你`:'等待牌友',snap.paused?'重连后保留原座位和手牌':s.phase==='playing'?`${nameOf(s.current_player)} 正在行动；轮到你时核对跟牌要求`:`${nameOf(s.current_player)} 正在行动`);return;}
  if(!selected.size){validationUI(s.phase==='burying'?'请选择八张扣底':'请选择牌',['dealing','final_bidding'].includes(s.phase)&&ownBid?(s.bid.strength===1?'当前主由你确定，仅可加固同花色级牌对子':'当前主由你确定，不能反自己；等待其他牌友反主'):s.phase==='dealing'?(s.bid?'反主须严格提高当前亮主强度':'首次亮主须为级牌，王只能反主'):s.phase==='final_bidding'?'拿底前反主须严格提高强度':s.phase==='countering'?'反主须严格高于当前强度':s.phase==='burying'?'金色标记为本次拿到的八张底牌，可选择任意八张扣下':s.trick.length?leadRequirement()+'，优先同门同型':'可出单张、对子、拖拉机或同门甩牌');return;}
+ if(realtime){
+  // AI-thinking and unrelated draws change the room version frequently.
+  // Waiting for a new preflight after every update can starve the button.
+  const valid=advertisedBid([...selected]);
+  validationUI(`已选 ${selected.size} 张${valid?' · 可以亮主／反主':' · 不可提交'}`,bidPending()?'正在发送亮主，请稍候':valid?'可立即提交，以服务器收到请求的先后为准':ownBid?(s.bid.strength===1?'只能加固为同花色级牌对，不能换门或反自己':'当前主由你确定，不能反自己'):'请选择可亮的级牌单张、同花色级牌对或王对；反主须严格提高强度',!valid);
+  $('submitButton').disabled=!valid||bidPending()||busy&&mode==='self';return;
+ }
  validationUI(`已选 ${selected.size} 张`,'正在核对牌型…');
  try{
   const v=await api('/api/validate',{version:snap.version,round:s.round,redeals:s.redeals,context:{level:s.level,trump:s.trump},action:selectedAction()});
   if(ticket!==validationTicket)return;
-  if((v.level!=null&&v.level!==s.level)||(realtime? v.phase!=null&&v.phase!==s.phase||v.round!=null&&v.round!==s.round||v.redeals!=null&&v.redeals!==s.redeals : (Object.hasOwn(v,'trump')&&v.trump!==s.trump)||(v.version!=null&&v.version!==snap.version))){
+  if((v.level!=null&&v.level!==s.level)||(Object.hasOwn(v,'trump')&&v.trump!==s.trump)||(v.version!=null&&v.version!==snap.version)){
    validationUI('正在同步牌桌','正在核对本局级牌和首家领出');
    const data=await api('/api/state');if(ticket===validationTicket)acceptSnapshot(data);return;
   }
-  if(v.valid){const forced=s.forced_play?.length===selected.size&&s.forced_play.every(c=>selected.has(c));validationUI(`${selected.size} 张 · ${v.message}`,realtime?'可立即提交，以服务器收到请求的先后为准':s.phase==='playing'&&!s.trick.length&&v.kind==='throw'?'甩牌尝试，提交后由裁判判定':forced?'唯一合法跟牌已预选 · 点击出牌确认'+(leadRequirement()?'；'+leadRequirement():''):leadRequirement()||'张数与跟牌要求符合桌规');$('submitButton').disabled=busy;}
+  if(v.valid){const forced=s.forced_play?.length===selected.size&&s.forced_play.every(c=>selected.has(c));validationUI(`${selected.size} 张 · ${v.message}`,s.phase==='playing'&&!s.trick.length&&v.kind==='throw'?'甩牌尝试，提交后由裁判判定':forced?'唯一合法跟牌已预选 · 点击出牌确认'+(leadRequirement()?'；'+leadRequirement():''):leadRequirement()||'张数与跟牌要求符合桌规');$('submitButton').disabled=busy;}
   else validationUI(`已选 ${selected.size} 张 · 不可提交`,v.message+(s.phase==='playing'&&s.trick.length?'；'+leadRequirement():''),true);
  }catch(e){if(ticket!==validationTicket)return;validationUI('暂时无法提交',e.message,true);if(e.code==='STALE'){try{const data=await api('/api/state');if(ticket===validationTicket)acceptSnapshot(data);}catch{}}}
 }
+async function submitRealtimeBid(action){
+ if(!canBidNow()||bidPending()||busy&&mode==='self')return;
+ const request={scope:sessionScope(),room:snap.room,round:snap.state.round,redeals:snap.state.redeals,cards:[...action.cards]};
+ bidRequest=request;validateSelection();
+ if(mode==='self')$('passButton').disabled=true;
+ try{
+  const data=await api('/api/bid',{round:request.round,redeals:request.redeals,action:{type:'bid',cards:request.cards}});
+  if(!currentSession(request.scope))return;
+  if(sameBidScope(request)&&selected.size===request.cards.length&&request.cards.every(c=>selected.has(c)))selected.clear();
+  acceptSnapshot(data);
+ }catch(e){if(currentSession(request.scope)){
+  toast(e.message);
+  if(e.code==='STALE'||e.code==='BIDDING_CLOSED'){try{const data=await api('/api/state');if(currentSession(request.scope))acceptSnapshot(data);}catch{}}
+ }}finally{
+  if(bidRequest===request)bidRequest=null;
+  if(currentSession(request.scope)){$('passButton').disabled=busy||mode==='self'&&bidPending();validateSelection();scheduleAutoDeal();}
+ }
+}
 async function act(action){
- if(busy||!snap||isTakeover()&&action.type!=='next_round')return;
+ // A delayed draw response must not hold up this seat's realtime bid.
+ // Keep the dedicated endpoint even when the local deadline just expired.
+ if(action.type==='bid'&&snap?.state?.phase==='dealing'&&snap.state.realtime_bidding)return submitRealtimeBid(action);
+ if(busy||!snap||mode==='self'&&bidPending()||isTakeover()&&action.type!=='next_round')return;
  const scope=sessionScope();
  busy=true;$('submitButton').disabled=true;$('passButton').disabled=true;
- // Do not fall back to the turn API when a local countdown just expired.
- const realtime=action.type==='bid'&&snap.state?.phase==='dealing'&&!!snap.state.realtime_bidding;
+ if(action.type==='pass'&&mode!=='self'&&canBidNow())validateSelection();
  const keepPreview=action.type==='pass'&&snap.state?.phase==='dealing'&&mode!=='self';
- try{const data=await api(realtime?'/api/bid':'/api/action',{version:snap.version,round:snap.state?.round,redeals:snap.state?.redeals,action});if(!currentSession(scope))return;if(!keepPreview)selected.clear();acceptSnapshot(data);}
+ try{const data=await api('/api/action',{version:snap.version,round:snap.state?.round,redeals:snap.state?.redeals,action});if(!currentSession(scope))return;if(!keepPreview)selected.clear();acceptSnapshot(data);}
  catch(e){if(!currentSession(scope))return;toast(e.message);if(e.code==='STALE'){try{const data=await api('/api/state');if(currentSession(scope))acceptSnapshot(data);}catch{}}}
  finally{if(currentSession(scope)){busy=false;$('passButton').disabled=false;if(snap?.state){renderHand();renderSettlement();}validateSelection();scheduleAutoDeal();}}
 }
@@ -492,6 +528,7 @@ async function poll(generation){
 }
 function resetUI(){
  pageClosing=false;
+ bidRequest=null;
  clearPlayNotices();
  pollGeneration++;validationTicket++;token=null;sessionStorage.removeItem('tractor_session');snap=null;selected.clear();busy=false;$('passButton').disabled=false;autoDeal=false;clearTimeout(autoTimer);autoTimer=null;autoDrawKey='';autoDrawDue=0;
  clearTimeout(biddingTimer);biddingEndAt=0;

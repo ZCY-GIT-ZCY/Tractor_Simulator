@@ -743,14 +743,30 @@ test('waiting player can preselect; other turns preserve cards and own turn reva
  assert.equal(latest(b,'/api/action'),undefined); // Preselection never submits a turn.
 });
 
+test('AI thinking and draw snapshots never block an already legal realtime bid behind HTTP preflight',()=>{
+ for(const mode of ['pvp','pve']){
+  const b=browser(),data=snapshot();data.mode=mode;data.state.current_player=3;
+  data.state.hand=[0,54,1];data.state.realtime_bidding=true;
+  data.state.bid_options=[{type:'bid',cards:[0]},{type:'bid',cards:[0,54]}];sit(b,data);
+  b.run('toggleCard(0)');
+  assert.equal(b.element('submitButton').disabled,false);
+  for(let tick=0;tick<20;tick++){
+   b.context.fixture={...data,version:5+tick,bot_thinking:tick%2===0,
+    state:{...data.state,current_player:[3,2,1,0][tick%4],deal_count:tick+8}};
+   b.run('acceptSnapshot(fixture)');
+   assert.equal(b.element('submitButton').disabled,false);
+   assert.equal(b.get('selected.has(0)'),true);
+  }
+  assert.equal(latest(b,'/api/validate'),undefined);
+ }
+});
+
 test('dealing allows offturn preselection and realtime bidding without a draw action',async()=>{
  const b=browser(),data=snapshot();data.state.current_player=3;data.state.hand=[0,54,1];
+ data.state.bid_options=[{type:'bid',cards:[0]}];
  data.state.realtime_bidding=true;data.state.deal_count=8;sit(b,data);
  b.run('toggleCard(0)');assert.equal(b.get('selected.has(0)'),true);
- const validation=latest(b,'/api/validate');
- assert.equal(JSON.parse(validation.options.body).round,1);
- validation.reply({valid:true,message:'可以亮主／反主',version:5,level:2,trump:'H',round:1,redeals:0,phase:'dealing'});
- await new Promise(setImmediate);
+ assert.equal(latest(b,'/api/validate'),undefined);
  assert.equal(b.element('submitButton').disabled,false);
  assert.match(b.element('submitButton').innerHTML,/亮主 \/ 反主/);
  const submit=b.element('submitButton').onclick();const request=latest(b,'/api/bid');
@@ -758,6 +774,86 @@ test('dealing allows offturn preselection and realtime bidding without a draw ac
  assert.equal(latest(b,'/api/action'),undefined);
  request.reply({...data,version:6,state:{...data.state,bid:{player:0,strength:1,cards:[0]},trump:'S'}});
  await submit;assert.equal(b.get('selected.size'),0);assert.equal(b.get('snap.state.deal_count'),8);
+});
+
+test('AI declarations immediately invalidate weak previews while a legal reinforcement remains available',()=>{
+ const b=browser(),data=snapshot();data.state.current_player=3;data.state.hand=[0,54,13];
+ data.state.realtime_bidding=true;data.state.bid_options=[{type:'bid',cards:[0]},{type:'bid',cards:[0,54]}];
+ sit(b,data);b.run('toggleCard(0)');assert.equal(b.element('submitButton').disabled,false);
+ const counter={...data,version:5,state:{...data.state,bid:{player:1,strength:1,cards:[13]},trump:'H',bid_options:[{type:'bid',cards:[0,54]}]}};
+ b.context.fixture=counter;b.run('acceptSnapshot(fixture)');
+ assert.equal(b.element('submitButton').disabled,true);assert.equal(b.get('selected.has(0)'),true);
+ b.run('toggleCard(54)');assert.equal(b.element('submitButton').disabled,false);
+ b.context.fixture={...counter,version:6,state:{...counter.state,bid:{player:2,strength:3,cards:[52,106]},bid_options:[]}};
+ b.run('acceptSnapshot(fixture)');assert.equal(b.element('submitButton').disabled,true);
+ assert.equal(latest(b,'/api/validate'),undefined);
+});
+
+test('local bid eligibility accepts either owned physical copy and follows the referee options',()=>{
+ const b=browser(),data=snapshot();data.state.current_player=3;data.state.hand=[0,54,13,52,106];
+ data.state.realtime_bidding=true;data.state.bid_options=[{type:'bid',cards:[0]},{type:'bid',cards:[0,54]}];
+ sit(b,data);b.run('toggleCard(54)');assert.equal(b.element('submitButton').disabled,false);
+ b.run('toggleCard(0)');assert.equal(b.element('submitButton').disabled,false);
+ b.run('selected=new Set([13]);validateSelection()');assert.equal(b.element('submitButton').disabled,true);
+ b.run('selected=new Set([52,106]);validateSelection()');assert.equal(b.element('submitButton').disabled,true);
+ data.state.bid_options=[{type:'bid',cards:[13]}];data.state.hand=[0];
+ b.context.fixture=data;b.run('snap=fixture;selected=new Set([67]);validateSelection()');
+ assert.equal(b.element('submitButton').disabled,true);assert.equal(latest(b,'/api/validate'),undefined);
+});
+
+test('a delayed automatic draw response never locks hand selection or the independent bid request',async()=>{
+ for(const mode of ['pve','pvp']){
+  const b=browser(),data=snapshot();data.mode=mode;data.state.hand=[0,54];data.state.realtime_bidding=true;
+  data.state.bid_options=[{type:'bid',cards:[0]},{type:'bid',cards:[0,54]}];sit(b,data);b.run('toggleCard(0)');
+  const draw=b.run('act({type:"pass"})'),drawing=latest(b,'/api/action');
+  assert.equal(b.get('busy'),true);assert.equal(b.element('submitButton').disabled,false);
+  const next={...data,version:5,bot_thinking:true,state:{...data.state,current_player:3,deal_count:2}};
+  b.context.fixture=next;b.run('acceptSnapshot(fixture);toggleCard(0);toggleCard(0)');
+  assert.equal(b.get('canSelectHand()'),true);assert.equal(b.element('submitButton').disabled,false);
+  const submitting=b.element('submitButton').onclick(),bid=latest(b,'/api/bid');assert.ok(bid);
+  assert.equal(JSON.parse(bid.options.body).round,1);assert.equal('version' in JSON.parse(bid.options.body),false);
+  await b.run('act(selectedAction())');assert.equal(b.requests.filter(r=>r.url==='/api/bid').length,1);
+  bid.reply({...next,version:6,state:{...next.state,bid:{player:0,strength:1,cards:[0]},trump:'S',bid_options:[{type:'bid',cards:[0,54]}]}});
+  await submitting;assert.equal(b.get('busy'),true);assert.equal(b.get('bidPending()'),false);
+  b.run('toggleCard(0);toggleCard(54)');assert.equal(b.element('submitButton').disabled,false);
+  drawing.reply(next);await draw;
+  assert.equal(b.get('snap.version'),6);assert.equal(b.get('busy'),false);
+  assert.deepEqual(Array.from(b.get('selected')),[0,54]);assert.equal(b.element('submitButton').disabled,false);
+ }
+});
+
+test('a bid acknowledgement preserves a newer selection prepared while the request was in flight',async()=>{
+ const b=browser(),data=snapshot();data.state.current_player=3;data.state.hand=[0,54];data.state.realtime_bidding=true;
+ data.state.bid_options=[{type:'bid',cards:[0]},{type:'bid',cards:[0,54]}];sit(b,data);b.run('toggleCard(0)');
+ const submitting=b.element('submitButton').onclick(),bid=latest(b,'/api/bid');
+ assert.match(b.element('submitButton').innerHTML,/发送中/);b.run('toggleCard(54)');
+ assert.equal(b.element('submitButton').disabled,true);
+ bid.reply({...data,version:5,state:{...data.state,bid:{player:0,strength:1,cards:[0]},trump:'S',bid_options:[{type:'bid',cards:[0,54]}]}});
+ await submitting;assert.deepEqual(Array.from(b.get('selected')),[0,54]);
+ assert.equal(b.element('submitButton').disabled,false);assert.match(b.element('submitButton').innerHTML,/加固/);
+});
+
+test('an old room bid response cannot unlock or clear a newer room bid',async()=>{
+ const b=browser(),data=snapshot();data.state.current_player=3;data.state.hand=[0];data.state.realtime_bidding=true;
+ data.state.bid_options=[{type:'bid',cards:[0]}];sit(b,data);b.run('toggleCard(0)');
+ const first=b.run('act(selectedAction())'),oldRequest=latest(b,'/api/bid');
+ const next={...data,room:'another_table',token:'another_token'};sit(b,next);b.run('toggleCard(0)');
+ const second=b.run('act(selectedAction())'),newRequest=latest(b,'/api/bid');
+ oldRequest.reply({...data,version:5});await first;
+ assert.equal(b.get('bidPending()'),true);assert.equal(b.get('selected.has(0)'),true);
+ assert.equal(b.get('snap.room'),'another_table');assert.equal(b.element('submitButton').disabled,true);
+ newRequest.reply({...next,version:5,state:{...next.state,bid:{player:0,strength:1,cards:[0]},bid_options:[]}});await second;
+ assert.equal(b.get('bidPending()'),false);assert.equal(b.get('selected.size'),0);
+});
+
+test('self play cannot change the acting hand with a draw while its declaration is being sent',async()=>{
+ const b=browser(),data=snapshot();data.mode='self';data.controlled=[0,1,2,3];data.state.realtime_bidding=true;
+ data.state.hands=[[0,54],[13],[26],[39]];data.state.bid_options=[{type:'bid',cards:[0]}];
+ sit(b,data);b.run('toggleCard(0)');const bid=b.run('act(selectedAction())'),request=latest(b,'/api/bid');
+ assert.equal(b.element('passButton').disabled,true);await b.run('act({type:"pass"})');
+ assert.equal(latest(b,'/api/action'),undefined);
+ request.reply({...data,version:5,state:{...data.state,bid:{player:0,strength:1,cards:[0]},bid_options:[]}});await bid;
+ assert.equal(b.element('passButton').disabled,false);
 });
 
 test('dealing previews survive other drawers, added cards and trump changes but not redeals',()=>{
@@ -799,26 +895,29 @@ test('after dealing the same player must wait for final bid polling',()=>{
 test('six-second completed draw window keeps realtime bids and hides all draw controls',async()=>{
  const b=browser(),data=snapshot();data.state.realtime_bidding=true;data.state.current_player=3;
  data.state.hand=[0,54];data.state.deal_count=100;
+ data.state.bid_options=[{type:'bid',cards:[0]}];
  data.state.bidding_window={complete:true,remaining_seconds:6,duration_seconds:6};
  b.run('autoDeal=true');sit(b,data);
  assert.equal(b.get('canBidNow()'),true);assert.equal(b.get('autoDeal'),false);
  for(const id of ['passButton','autoDealButton','randomButton'])assert.equal(b.element(id).hidden,true);
  assert.match(b.element('tableStatus').textContent,/摸牌结束.*还可亮主/);
- b.run('toggleCard(0)');latest(b,'/api/validate').reply({valid:true,message:'可以亮主'});
- await new Promise(setImmediate);assert.equal(b.element('submitButton').disabled,false);
+ b.run('toggleCard(0)');assert.equal(latest(b,'/api/validate'),undefined);
+ assert.equal(b.element('submitButton').disabled,false);
  assert.equal(latest(b,'/api/action'),undefined);
 });
 
-test('expired grace disables submission and discards a delayed valid preflight',async()=>{
+test('expired grace disables an advertised legal bid and cannot fall back to the turn endpoint',async()=>{
  const b=browser(),data=snapshot();data.state.realtime_bidding=true;data.state.hand=[0];
+ data.state.bid_options=[{type:'bid',cards:[0]}];
  data.state.bidding_window={complete:true,remaining_seconds:6,duration_seconds:6};sit(b,data);
- b.run('toggleCard(0)');const pending=latest(b,'/api/validate');
+ b.run('toggleCard(0)');assert.equal(b.element('submitButton').disabled,false);
  b.run('biddingEndAt=Date.now()-1;updateBiddingCountdown()');
  assert.equal(b.get('canBidNow()'),false);assert.equal(b.element('submitButton').disabled,true);
- pending.reply({valid:true,message:'可以亮主'});await new Promise(setImmediate);
+ await b.run('act(selectedAction())');
  assert.equal(b.element('submitButton').disabled,true);
  assert.match(b.element('tableStatus').textContent,/实时亮主结束/);
  assert.equal(latest(b,'/api/bid'),undefined);
+ assert.equal(latest(b,'/api/action'),undefined);
 });
 
 test('another bid preserves previews and uses remaining grace instead of a fresh six seconds',()=>{
@@ -976,13 +1075,14 @@ test('a peer takeover badge is public while own manual controls remain available
  assert.match(b.element('playersLayer').innerHTML,/&lt;other&gt;/);assert.match(b.element('playersLayer').innerHTML,/AI 托管/);
 });
 
-test('turning on takeover cancels automatic draws and ignores a delayed validation',async()=>{
- const b=browser(),data=snapshot();data.takeover=false;data.state.realtime_bidding=true;sit(b,data);
- b.run('autoDeal=true;scheduleAutoDeal();toggleCard(1)');const validating=latest(b,'/api/validate');
+test('turning on takeover cancels automatic draws and cannot be undone by a delayed bid acknowledgement',async()=>{
+ const b=browser(),data=snapshot();data.takeover=false;data.state.realtime_bidding=true;
+ data.state.hand=[0];data.state.bid_options=[{type:'bid',cards:[0]}];sit(b,data);
+ b.run('autoDeal=true;scheduleAutoDeal();toggleCard(0)');const submitting=b.run('act(selectedAction())'),pending=latest(b,'/api/bid');
  const timer=b.timers.get(b.get('autoTimer')).fn;
  b.context.fixture={...data,version:5,takeover:true};b.run('acceptSnapshot(fixture)');
  assert.equal(b.get('autoDeal'),false);assert.equal(b.get('selected.size'),0);
- validating.reply({valid:true,message:'可以亮主',level:2});await new Promise(setImmediate);
+ pending.reply({...data,version:4});await submitting;
  assert.equal(b.element('submitButton').disabled,true);const count=b.requests.length;timer();assert.equal(b.requests.length,count);
 });
 

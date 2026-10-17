@@ -2,11 +2,14 @@ import copy
 import unittest
 import threading
 import time
+import json
+import tempfile
+import urllib.request
 
 from tractor_sim import TractorEnv, GameConfig, IllegalAction
 from tractor_sim.cards import points
 from test_rules import c, fixture, dealt_bidding_env
-from tractor_sim.server import Room, Registry
+from tractor_sim.server import Room, Registry, TractorServer
 
 
 def waiting_deal():
@@ -194,6 +197,52 @@ class BiddingGraceClock(unittest.TestCase):
 
 
 class GraceAsyncPolicies(unittest.TestCase):
+    def test_http_bid_completes_while_ai_and_state_long_poll_are_waiting(self):
+        entered, release = threading.Event(), threading.Event()
+        class BlockedPolicy:
+            def __init__(self, seed): pass
+            def act(self, observation):
+                entered.set()
+                release.wait(5)
+                return observation['bid_options'][0] if observation['bid_options'] else {'type': 'pass'}
+
+        with tempfile.TemporaryDirectory() as directory:
+            server = TractorServer(('127.0.0.1', 0), policy_factory=BlockedPolicy, history_dir=directory)
+            worker = threading.Thread(target=server.serve_forever, daemon=True); worker.start()
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            session = server.registry.enter({'mode': 'pve', 'seat': 0, 'name': '实时亮主测试'})
+            token = session['token']; room = server.registry.lookup(token)
+            base = f'http://127.0.0.1:{server.server_port}'
+            def request(path, body=None):
+                req = urllib.request.Request(base + path, headers={
+                    'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+                    data=None if body is None else json.dumps(body).encode())
+                with opener.open(req, timeout=2) as response: return json.load(response)
+            try:
+                with room.condition:
+                    room.env = waiting_deal(); room.sync_bidding_window(); room.next_bot_at = 0
+                self.assertTrue(entered.wait(2))
+                with room.condition:
+                    version = room.version
+                poll = threading.Thread(target=lambda: request(f'/api/state?since={version}&wait=4'), daemon=True)
+                poll.start()
+                response = request('/api/bid', {'round': 1, 'redeals': room.env.redeals,
+                    'action': {'type': 'bid', 'cards': c('H', 2)}})
+                self.assertFalse(release.is_set())
+                self.assertEqual(response['state']['bid']['player'], 0)
+                self.assertEqual(response['state']['deal_count'], 100)
+                self.assertEqual(response['state']['current_player'], 1)
+                with room.condition:
+                    room.next_bot_at = time.monotonic() + 30
+                release.set(); poll.join(2)
+                self.assertFalse(poll.is_alive())
+                deadline = time.monotonic() + 2
+                while room.pending is not None and time.monotonic() < deadline: time.sleep(.01)
+                self.assertEqual(room.env.bid['player'], 0)
+                self.assertFalse(room.policy_error)
+            finally:
+                release.set(); server.shutdown(); server.server_close(); worker.join(3)
+
     def test_ai_can_bid_during_grace_when_last_drawer_is_human(self):
         class BidPolicy:
             def __init__(self,seed):pass
