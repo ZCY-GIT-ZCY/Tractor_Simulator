@@ -12,6 +12,7 @@ from .rules import (IllegalAction, describe, components, validate_play, throw_su
                     minimal_unit, matched_max, forced_follow)
 
 SCHEMA_VERSION = 1
+MANDATORY_COMPLETION_RULE = "defending_win_v1"
 
 
 @dataclass(frozen=True)
@@ -48,9 +49,10 @@ class TractorEnv:
         self.rng = random.Random(seed)
         self.turn_direction = -1  # Fixed seats: south 0 -> east 3 -> north 2 -> west 1.
         self.levels = [self.config.initial_level] * 2
-        # Only a completed defending hand earns credit; choosing an initial
+        # Only a won defending hand earns credit; choosing an initial
         # level never invents defending history for either partnership.
         self.passed = [set(), set()]
+        self.mandatory_completion_rule = MANDATORY_COMPLETION_RULE
         self.banker = self.config.banker
         self.round_no = 0
         self.redeals = 0
@@ -371,7 +373,7 @@ class TractorEnv:
         start = self.levels[team]
         target = min(14, start + amount)
         # Include start itself: gaining the table at 2/5/... does not count
-        # as having played that level as defenders and cannot move past it.
+        # as having won that level as defenders and cannot move past it.
         for r in sorted(MANDATORY):
             if start <= r <= target and r not in self.passed[team]:
                 return r
@@ -390,8 +392,9 @@ class TractorEnv:
             self.bottom_score = sum(points(c) for c in self.kitty) * multiplier
             self.score += self.bottom_score
         old_levels = self.levels[:]
-        self.passed[defense].add(self.level)
         defending_won = self.score < 80
+        if defending_won:
+            self.passed[defense].add(self.level)
         upgrading = defense if defending_won else attack
         amount = (3 if self.score <= 0 else 2 if self.score < 40 else 1) if defending_won else self.score // 40 - 2
         target = min(14, self.levels[upgrading] + amount)
@@ -401,7 +404,7 @@ class TractorEnv:
         if winner % 2 == attack and self.level in (11, 14) and any(rank(c) == self.level for c in winning_cards):
             downgrade = 2 if self.level == 11 else 11
             self.levels[defense] = downgrade  # permanent mandatory records are preserved
-        if self.level == 14 and defending_won and downgrade is None:
+        if self.level == 14 and defending_won and downgrade is None and self.levels[defense] == 14:
             self.match_winner = defense
         next_banker = self.next_seat(banker, 2 if defending_won else 1)
         self.result = {"round": self.round_no, "level": self.level, "banker": banker,
@@ -438,7 +441,8 @@ class TractorEnv:
                "phase": self.phase, "player": player, "current_player": self.current_player,
                "turn_direction": self.turn_direction, "realtime_bidding": True,
                "level": self.level, "level_label": LABELS[self.level], "levels": self.levels[:],
-               "passed_levels": [sorted(s) for s in self.passed], "auction": self.auction,
+               "passed_levels": [sorted(s) for s in self.passed],
+               "mandatory_completion_rule": self.mandatory_completion_rule, "auction": self.auction,
                "banker": None if self.phase == "dealing" and self.auction and not self.bid else self.banker,
                "trump": self.trump, "bid": copy.deepcopy(self.bid), "bid_history": copy.deepcopy(self.bid_history),
                "hand": sorted(self.hands[player], key=lambda c: sort_key(c, self.level, self.trump)),
@@ -508,6 +512,36 @@ class TractorEnv:
                      passed=[sorted(p) for p in self.passed], rng_state=self.rng.getstate())
         return state
 
+    def _migrate_mandatory_wins(self):
+        """Rebuild old completion credit from the full public match results."""
+        self.passed = [set(), set()]
+        floors = [self.config.initial_level] * 2
+        for event in self.events:
+            if event['type'] != 'round_ended':
+                continue
+            defense = event['banker'] % 2
+            if event['winner'] == defense:
+                self.passed[defense].add(event['level'])
+            for team in range(2):
+                floors[team] = min(floors[team], event['levels_after'][team])
+        # Retain the cards and level of an already-started hand. Only the
+        # teams' progression changes; the next hand uses the corrected level.
+        if self.phase != 'match_end':
+            for team in range(2):
+                floor = min(floors[team], self.levels[team])
+                self.levels[team] = next((r for r in sorted(MANDATORY)
+                    if floor <= r < self.levels[team] and r not in self.passed[team]), self.levels[team])
+        if self.phase == 'round_end' and self.result is not None:
+            upgrading = self.result['upgrading_team']
+            if self.levels[upgrading] < self.result['levels_after'][upgrading]:
+                self.result['mandatory_stop'] = self.levels[upgrading]
+            self.result['levels_after'] = self.levels[:]
+            for event in self.events:
+                if event['type'] == 'round_ended' and event['round'] == self.result['round']:
+                    event['levels_after'] = self.levels[:]
+                    event['mandatory_stop'] = self.result['mandatory_stop']
+        self.mandatory_completion_rule = MANDATORY_COMPLETION_RULE
+
     @classmethod
     def from_state(cls, state):
         """Trusted simulator checkpoint; contains ALL hidden information."""
@@ -525,6 +559,8 @@ class TractorEnv:
             env.public_history = [e for e in env.events[start:] if e["type"] in
                                   ("bid", "kitty_picked_up", "kitty_buried", "play", "throw_failed")]
         env.passed = list(map(set, state["passed"]))
+        if state.get('mandatory_completion_rule') != MANDATORY_COMPLETION_RULE:
+            env._migrate_mandatory_wins()
         if not hasattr(env, "final_bid_queue"):
             env.final_bid_queue = []
         # Upgrade checkpoints from the earlier four-seat countering procedure.

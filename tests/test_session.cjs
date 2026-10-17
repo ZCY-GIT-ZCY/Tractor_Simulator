@@ -909,11 +909,11 @@ test('own current trump explains why the post-burial counter poll skips self',()
  assert.match(b.element('validationDetail').textContent,/重新轮询/);
 });
 
-test('result explains staying at unplayed mandatory two after gaining the table',()=>{
+test('result explains that mandatory two requires a defending win before promotion',()=>{
  const b=browser(),data=ending();data.settlement.confirmed=true;
  data.state.result={...data.state.result,level:3,winner:1,banker:0,score:160,
   levels_before:[3,2],levels_after:[3,2],upgrade:2,mandatory_stop:2,next_banker:1};sit(b,data);
- assert.match(b.element('resultMessage').textContent,/必打 2 尚未坐庄打过/);
+ assert.match(b.element('resultMessage').textContent,/必打 2 尚未坐庄获胜/);
  assert.match(b.element('resultLevels').innerHTML,/金队 2 → <strong>2/);
 });
 

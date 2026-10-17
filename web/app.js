@@ -297,7 +297,7 @@ function renderResult(){
  $('resultLevels').innerHTML=`<span>青队 ${label(r.levels_before[0])} → <strong>${label(r.levels_after[0])}</strong></span><span>金队 ${label(r.levels_before[1])} → <strong>${label(r.levels_after[1])}</strong></span>`;
  $('resultKitty').innerHTML=r.kitty?.length?r.kitty.map(c=>cardHTML(c)).join(''):'';
  $('resultKitty').hidden=!r.kitty?.length;
- $('resultMessage').textContent=(r.downgrade?'触发 '+label(r.level)+' 扣底，庄家方退回 '+label(r.downgrade)+'。':'')+(r.mandatory_stop!=null?`必打 ${label(r.mandatory_stop)} 尚未坐庄打过，本次升级停在 ${label(r.mandatory_stop)}。`:'')+(s.phase==='match_end'?'A 级坐庄获胜，比赛结束。':`下一局由 ${nameOf(r.next_banker)} 坐庄。必打等级的完成记录永久保留。`);
+ $('resultMessage').textContent=(r.downgrade?'触发 '+label(r.level)+' 扣底，庄家方退回 '+label(r.downgrade)+'。':'')+(r.mandatory_stop!=null?`必打 ${label(r.mandatory_stop)} 尚未坐庄获胜，本次升级停在 ${label(r.mandatory_stop)}。`:'')+(s.phase==='match_end'?'A 级坐庄获胜，比赛结束。':`下一局由 ${nameOf(r.next_banker)} 坐庄。必打等级的获胜记录永久保留。`);
  $('nextRoundButton').textContent=s.phase==='match_end'?'新建一场比赛 →':snap.host?'开始下一局 →':'等待房主开始下一局';
  $('nextRoundButton').disabled=s.phase!=='match_end'&&!snap.host;
  $('resultReplayLink').href=snap.replay_id?'/history.html?id='+encodeURIComponent(snap.replay_id):'/history.html';

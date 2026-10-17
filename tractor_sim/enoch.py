@@ -14,7 +14,7 @@ from functools import lru_cache
 from itertools import combinations
 
 from .cards import face, rank, suit, power, points, effective_suit
-from .engine import GameConfig, TractorEnv
+from .engine import GameConfig, TractorEnv, MANDATORY_COMPLETION_RULE
 from .rules import (IllegalAction, blocks, components, describe, follow_witness,
                     matched_max, structure_profile, throw_succeeds, validate_play)
 
@@ -482,6 +482,7 @@ def sample_world(o, rng, knowledge=None):
     env.seed = None; env.rng = random.Random(rng.getrandbits(64))
     env.turn_direction = o.get('turn_direction', -1)
     env.levels = o["levels"][:]; env.passed = list(map(set,o["passed_levels"]))
+    env.mandatory_completion_rule = MANDATORY_COMPLETION_RULE
     env.banker = o["banker"]; env.round_no = o["round"]; env.redeals = o["redeals"]
     env.revision = o["revision"]; env.auction = o["auction"]
     env.level = o["level"]; env.trump = o["trump"]

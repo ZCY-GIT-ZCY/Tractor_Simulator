@@ -653,7 +653,7 @@ class EngineRules(unittest.TestCase):
                     env._settle(0)
                     self.assertEqual(env.levels[1],level)
                     self.assertNotIn(level,env.passed[1])
-                    self.assertIn(level,env.passed[0])
+                    self.assertNotIn(level,env.passed[0])
                     self.assertEqual(env.result['upgrade'],score//40-2)
                     if level<14:self.assertEqual(env.result['mandatory_stop'],level)
                     env.step({'type':'next_round'})
@@ -667,6 +667,36 @@ class EngineRules(unittest.TestCase):
             env.last_trick={'plays':[{'player':p,'cards':h} for p,h in enumerate(env.hands)]}
             env._settle(0)
             self.assertEqual(env.levels[1],level+1)
+
+    def test_defending_win_is_required_at_every_mandatory_level_and_score_boundary(self):
+        for level in sorted(MANDATORY):
+            for banker in (0, 1):
+                for score in (0, 39, 40, 79, 80, 119, 120, 150, 200):
+                    with self.subTest(level=level,banker=banker,score=score):
+                        env=fixture([c('S',3),c('H',3),c('D',3),c('C',3)],level=level,banker=banker)
+                        env.score=env.captured_score=score
+                        env.last_trick={'plays':[{'player':p,'cards':h} for p,h in enumerate(env.hands)]}
+                        env._settle(banker)  # No bottom score changes the chosen boundary.
+                        self.assertEqual(level in env.passed[banker%2],score<80)
+                        self.assertNotIn(level,env.passed[1-banker%2])
+
+    def test_losing_two_then_scoring_150_as_attackers_does_not_complete_two(self):
+        def end(level,banker,score,passed):
+            env=fixture([c('S',3),c('H',3),c('D',3),c('C',3)],level=level,banker=banker)
+            env.levels=[8,2];env.passed=copy.deepcopy(passed)
+            env.score=env.captured_score=score
+            env.last_trick={'plays':[{'player':p,'cards':h} for p,h in enumerate(env.hands)]}
+            env._settle(banker)
+            return env
+        lost=end(2,3,130,[{2,5},set()])
+        self.assertNotIn(2,lost.passed[1])
+        attacking=end(8,0,150,lost.passed)
+        self.assertEqual(attacking.levels[1],2)
+        self.assertEqual(attacking.result['mandatory_stop'],2)
+        won=end(2,3,79,attacking.passed)
+        self.assertIn(2,won.passed[1]);self.assertEqual(won.levels[1],3)
+        eligible=end(8,0,150,won.passed)
+        self.assertEqual(eligible.levels[1],3)
 
     def test_high_initial_level_downgrade_does_not_invent_a_played_two(self):
         env=fixture([c('S',3),c('D',11),c('S',4),c('S',5)],level=11)
