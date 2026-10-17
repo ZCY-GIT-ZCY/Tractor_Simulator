@@ -34,9 +34,11 @@ ROOM_MEMBER_LIMIT = 16
 
 
 class Room:
-    def __init__(self, code, mode, config, seed=None, policy_factory=None, history=None):
+    def __init__(self, code, mode, config, seed=None, policy_factory=None, history=None, continuation=None):
         self.code, self.mode, self.config = code, mode, config
-        self.env = TractorEnv(config, seed)
+        self.continuation = continuation
+        self.env = TractorEnv.from_progress(continuation['progress'], seed) if continuation else TractorEnv(config, seed)
+        self.config = self.env.config
         self.history = history
         self.recording = RoundRecording(self.env) if history else None
         self.replay_id = None
@@ -154,7 +156,7 @@ class Room:
                         players.append({"seat": seat, "name": self.player_name(seat, human, bot), "bot": bot})
                     try:
                         self.replay_id = self.history.save(self.recording, mode=self.mode,
-                            room=self.code, players=players, config=asdict(self.config))
+                            room=self.code, players=players, config=asdict(self.config), continuation=self.continuation)
                     except OSError as exc:
                         self.history_error = "回放保存失败，请检查服务端存储空间和日志"
                         print(f"History error in {self.code}: {exc}", flush=True)
@@ -587,7 +589,7 @@ class Room:
                 "settlement": self.settlement(client),
                 "record_plays": self.record_plays, "can_set_record_plays": token == self.host,
                 "pause_reason": "policy_error" if self.policy_error else "disconnected" if self.paused else None,
-                "config": asdict(self.config), "state": obs}
+                "config": asdict(self.config), "continuation": self.continuation, "state": obs}
 
     def can_act(self, token, action):
         client = self.check(token)
@@ -664,7 +666,25 @@ class Registry:
         name = name.strip()
         if len(name) > 24:
             raise ValueError("昵称最多 24 个字符")
-        config = GameConfig(**data.get("config", {}))
+        continuation = None
+        if 'continue_from' in data:
+            if mode != 'pvp':
+                raise ValueError('历史续局须进入选座房间，可用 AI 填充空席')
+            identifier = data['continue_from']
+            if not isinstance(identifier, str):
+                raise ValueError('历史记录编号无效')
+            try:
+                continuation = self.history.continuation(identifier)
+            except KeyError:
+                raise ValueError('找不到这份历史记录') from None
+            if not continuation['available']:
+                raise ValueError(continuation['message'])
+            # Never trust client-supplied levels, passed flags or banker.
+            p = continuation['progress']
+            config = GameConfig(auction=False, banker=p['next_banker'],
+                                initial_level_a=p['levels'][0], initial_level_b=p['levels'][1])
+        else:
+            config = GameConfig(**data.get("config", {}))
         self.prune()
         with self.lock:
             if mode == "pvp":
@@ -680,7 +700,10 @@ class Registry:
                 if room is None:
                     if len(self.rooms) >= self.max_rooms:
                         raise IllegalAction("ROOM_LIMIT", "牌桌已满，请稍后再创建房间")
-                    room = Room(code, mode, config, data.get("seed"), self.policy_factory, self.history); self.rooms[code] = room
+                    room = Room(code, mode, config, data.get("seed"), self.policy_factory, self.history,
+                                continuation=continuation); self.rooms[code] = room
+                elif continuation is not None:
+                    raise ValueError('该房间号已存在，请留空创建独立续局房间')
                 elif room.mode != "pvp":
                     raise ValueError("该房间号不可用")
                 token = room.join(name)
@@ -897,6 +920,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/history":
                 self.json_response(self.server.registry.history.listing()); return
+            continuation_match = re.fullmatch(r'/api/history/([a-f0-9]{32})/continuation', parsed.path)
+            if continuation_match:
+                try:
+                    self.json_response(self.server.registry.history.continuation(continuation_match[1]))
+                except KeyError:
+                    self.json_response({'error': 'NOT_FOUND', 'message': '这份历史记录不存在'}, 404)
+                return
             if parsed.path.startswith("/api/history/"):
                 try:
                     record = self.server.registry.history.read(parsed.path.removeprefix("/api/history/"))

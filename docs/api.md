@@ -22,7 +22,7 @@
 
 | 方法 / 属性 | 含义 |
 |---|---|
-| `reset(seed=None)` | 重开整场、重置 RNG 和两队等级，返回当前玩家观察；首次牌已经发出 |
+| `reset(seed=None, *, progress=None)` | 重置 RNG 并返回当前玩家观察，首次牌已经发出；默认重开整场，传入有效结算进度时从下一局重新发牌 |
 | `current_player` / `phase` | 当前唯一行动座位 / 阶段 |
 | `observe(player, omniscient=False)` | 返回深拷贝观察；默认只给该座位可知信息；omniscient 仅增加四家手牌，不公开隐藏底牌 |
 | `validate_action(action, player=None)` | 无副作用预校验，返回 `{valid, kind, message, ...}` 或 `{valid:false, code, message}` |
@@ -30,6 +30,8 @@
 | `forced_play(player=None)` | 当前跟牌者只有一种合法牌面组合时返回实体牌列表，其他情况返回 None；不自动出牌 |
 | `iter_legal_actions(player=None)` | 惰性合法动作枚举，同牌面实体替代组合去重；包含所有合法甩牌尝试 |
 | `export_state()` / `from_state(state)` | 完整可 JSON 序列化快照与恢复，保留 RNG，包含隐藏信息，仅供可信离线使用 |
+| `export_progress()` | 已完成整局的公开比赛进度，含双方等级、永久获胜记录、下一位庄家、已完成局号与规则标识；进行中调用报错 |
+| `TractorEnv.from_progress(progress, seed=None)` | 从上述结算进度开始下一局，重新洗牌并关闭首局抢庄；不恢复旧手牌、RNG 或行动日志 |
 | `assert_invariants()` | 检查 108 张实体守恒、得分分账和结束手牌为空 |
 
 `seed` 明确指定才保证初始发牌可复现。策略 RNG 与环境 RNG 独立；同初始 seed、config 和接受动作顺序可以精确重放。`tractor_sim.replay.replay_episode` 校验 CLI JSON 的一个 episode，并返回恢复环境；CLI `--replay` 检查文件全部 episode。
@@ -90,7 +92,7 @@ PVE 默认策略为 `EnochPolicy`，详细预算、输入隔离与适配说明�
 
 | 请求 | 请求内容 | 返回 |
 |---|---|---|
-| `POST /api/session` | `{mode:"self"|"pve"|"pvp",name,room?,seat?,config?,seed?}` | token + 房间快照 |
+| `POST /api/session` | `{mode:"self"|"pve"|"pvp",name,room?,seat?,config?,seed?,continue_from?}` | token + 房间快照 |
 | `GET /api/state?since=版本&wait=4` | 无；wait 0..5 秒 | 房间快照，版本无变化时最多等待指定时间 |
 | `POST /api/seat/confirm` | `{seat:0..3}` | 开局前／局间原子确认空席或替换 AI；真人已占用返回 `SEAT_TAKEN`，本局已开始返回 `IN_PROGRESS` |
 | `POST /api/seat/cancel` | `{}` | PVP 开局前释放自己的确认座位，不退出房间 |
@@ -143,6 +145,10 @@ PVP 新会话只在开局前或 `round_end` 局间接纳，`dealing/final_biddin
 ## 历史回放
 
 `GET /api/history` 自动列出已完成局的元数据，`GET /api/history/<id>` 一次读取完整回放帧。未完成局不会发布。实时状态新增 `replay_id` 和 `history_error`。保存目录、帧格式和可见范围详见 [回放说明](replay.md)。
+
+`GET /api/history/<id>/continuation` 返回 `{available,source_id,source_round,source_level,source_score,finished_at,previous_players,...}`。可恢复时另含 `progress,next_round,levels,passed_levels,next_banker,next_level,mandatory_corrected`；不可恢复时含 `message`，未知 ID 返回 404。`progress` 使用 `schema_version:1`、`completed_round`、`levels`、`passed_levels`、`next_banker`、`mandatory_completion_rule:"defending_win_v1"`，新记录另存 `match_winner`。不含任何牌或会话凭据。
+
+创建续局须提交 `{mode:"pvp",name,continue_from:"历史ID"}` 到 `/api/session`，可选未使用的 `room`；留空生成新房间。服务器重新读取指定记录，以其最终结算为唯一进度来源，忽略客户端附加的等级、获胜记录和庄家配置。已有房间号、比赛已结束或进度不可恢复时拒绝，不覆盖或重置旧房间。快照 `continuation` 含上述来源与进度摘要，普通房间为 null；房间创建后仍为未选座、未开局，使用现有选座、AI 补位和开始接口即可。续局也经过在线更新 checkpoint 保存和恢复。
 
 ### 网页终局核对
 

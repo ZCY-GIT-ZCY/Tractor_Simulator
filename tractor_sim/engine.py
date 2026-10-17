@@ -52,11 +52,13 @@ class StepResult:
 
 
 class TractorEnv:
-    def __init__(self, config=None, seed=None):
+    def __init__(self, config=None, seed=None, *, progress=None):
         self.config = config if isinstance(config, GameConfig) else GameConfig(**(config or {}))
-        self.reset(seed=seed)
+        self.reset(seed=seed, progress=progress)
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, *, progress=None):
+        if progress is not None:
+            self.validate_progress(progress)
         self.seed = seed
         self.rng = random.Random(seed)
         self.turn_direction = -1  # Fixed seats: south 0 -> east 3 -> north 2 -> west 1.
@@ -73,8 +75,46 @@ class TractorEnv:
         self.action_log = []
         self.result = None
         self.match_winner = None
-        self._start_round(self.config.auction)
+        if progress is not None:
+            self.levels = progress['levels'][:]
+            self.passed = [set(p) for p in progress['passed_levels']]
+            self.banker = progress['next_banker']
+            self.round_no = progress['completed_round']
+        self._start_round(self.config.auction if progress is None else False)
         return self.observe(self.current_player)
+
+    @staticmethod
+    def validate_progress(progress):
+        """A between-hand checkpoint contains no cards, seed or active actions."""
+        if (not isinstance(progress, dict) or progress.get('schema_version') != 1 or
+                progress.get('mandatory_completion_rule') != MANDATORY_COMPLETION_RULE):
+            raise ValueError('不兼容的比赛进度')
+        if progress.get('match_winner') is not None:
+            raise ValueError('整场比赛已结束，不能续开下一局')
+        levels, passed = progress.get('levels'), progress.get('passed_levels')
+        if (not isinstance(levels, list) or len(levels) != 2 or
+                any(type(r) is not int or r not in range(2, 15) for r in levels) or
+                not isinstance(passed, list) or len(passed) != 2 or
+                any(not isinstance(p, list) or any(type(r) is not int or r not in range(2, 15) for r in p)
+                    for p in passed) or
+                type(progress.get('next_banker')) is not int or progress['next_banker'] not in range(4) or
+                type(progress.get('completed_round')) is not int or progress['completed_round'] < 1):
+            raise ValueError('比赛进度中的等级、获胜记录或庄家无效')
+
+    @classmethod
+    def from_progress(cls, progress, seed=None):
+        cls.validate_progress(progress)
+        config = GameConfig(auction=False, banker=progress['next_banker'],
+                            initial_level_a=progress['levels'][0], initial_level_b=progress['levels'][1])
+        return cls(config, seed, progress=progress)
+
+    def export_progress(self):
+        if self.phase not in ('round_end', 'match_end'):
+            raise ValueError('只能从已完成的整局导出比赛进度')
+        return {'schema_version': 1, 'completed_round': self.round_no,
+                'levels': self.levels[:], 'passed_levels': [sorted(p) for p in self.passed],
+                'next_banker': self.banker, 'match_winner': self.match_winner,
+                'mandatory_completion_rule': self.mandatory_completion_rule}
 
     def _event(self, kind, **data):
         event = {"seq": len(self.events), "round": self.round_no, "type": kind, **data}

@@ -67,6 +67,21 @@ test('history preloads records and lists cards with escaped player names',async(
  assert.doesNotMatch(p.element('historyList').innerHTML,/<script>名字/);
  assert.ok(p.requests.some(r=>r.url.startsWith('/api/history/')));
 });
+test('history exposes a settlement continuation link independently of playback position',async()=>{
+ const p=page(),data=await load(p);
+ assert.match(p.element('historyList').innerHTML,new RegExp('/\\?continue='+data.meta.id));
+ await p.run(`openRecord('${data.meta.id}')`);
+ assert.equal(p.element('continueReplay').href,'/?continue='+data.meta.id);
+ assert.equal(p.element('continueReplay').hidden,false);
+ p.element('replayNext').onclick();
+ assert.equal(p.element('continueReplay').href,'/?continue='+data.meta.id);
+});
+test('a fully completed match has no continuation action',async()=>{
+ const p=page(),data=fixture();data.meta.result.match_winner=0;
+ await load(p,data);await p.run(`openRecord('${data.meta.id}')`);
+ assert.doesNotMatch(p.element('historyList').innerHTML,/\?continue=/);
+ assert.equal(p.element('continueReplay').hidden,true);
+});
 test('a selected replay loads once; all manual steps stay local and readonly',async()=>{
  const p=page(),data=await load(p);await p.run(`openRecord('${data.meta.id}')`);
  const requestCount=p.requests.length;p.element('replayNext').onclick();

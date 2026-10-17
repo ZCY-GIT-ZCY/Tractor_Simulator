@@ -7,7 +7,7 @@ const vm = require('node:vm');
 
 // Run the real UI controller against a minimal DOM and a delayed HTTP transport.
 // Responses are deliberately delivered after leaving/joining another session.
-function browser(initialToken = null, saved = null) {
+function browser(initialToken = null, saved = null, search = '') {
  const elements = new Map(), requests = [], listeners = new Map(), timers = new Map(), beacons=[];let timerId=0;
  function element(id) {
   if (!elements.has(id)) elements.set(id, {id, hidden:true, disabled:false, value:id==='nameInput'?'':'0', checked:true,
@@ -27,7 +27,8 @@ function browser(initialToken = null, saved = null) {
  class ClockDate extends Date { static now(){return now;} }
  const context = vm.createContext({Date:ClockDate,document:{getElementById:element, querySelectorAll(){return [];},
   addEventListener:(event,fn)=>listeners.set(event,fn)}, sessionStorage,localStorage,
-  location:{search:'',origin:'http://127.0.0.1:8765',hostname:'127.0.0.1'},
+  location:{search,origin:'http://127.0.0.1:8765',hostname:'127.0.0.1'},
+  history:{replaceState(state,title,url){context.location.search=new URL(url,context.location.origin).search;}},
   window:{addEventListener:(event,fn)=>listeners.set('window:'+event,fn)}, navigator:{sendBeacon:(url,body)=>{beacons.push({url,body});return true;}}, Blob, innerWidth:1280,
   getComputedStyle(){return {getPropertyValue:key=>({'--table-scale':'1.6','--table-card-base-width':context.innerWidth<=760?'32px':'44px'}[key]??'')};},
   URL,URLSearchParams,AbortController, setTimeout(fn,delay){const id=++timerId;timers.set(id,{fn,delay});return id;},clearTimeout(id){timers.delete(id);},
@@ -60,6 +61,57 @@ function sit(browser,data=snapshot()) {
  browser.run('token=fixture.token;acceptSnapshot(fixture);rememberSeat()');
 }
 function latest(browser,path){return browser.requests.findLast(r=>r.url===path);}
+
+function continuationFixture(){return {available:true,source_id:'a'.repeat(32),source_round:8,
+ next_round:9,levels:[8,2],passed_levels:[[2,3,4,5,7],[]],next_banker:3,next_level:2,
+ previous_players:[0,1,2,3].map(seat=>({seat,name:seat===1?'<旧玩家>':'旧玩家'+seat}))};}
+
+test('continuation URL loads authoritative preview before admission and suppresses old-session bootstrap',async()=>{
+ const b=browser('old_token',{token:'old_token',room:'old_table',mode:'pvp'},'?continue='+'a'.repeat(32));
+ assert.equal(b.get('token'),null);assert.equal(b.get('mode'),'pvp');
+ assert.equal(latest(b,'/api/state'),undefined);
+ assert.equal(b.element('setupForm[type=submit]').disabled,true);
+ assert.equal(b.element('sharedLevelField').hidden,true);assert.equal(b.element('auctionField').hidden,true);
+ latest(b,'/api/history/'+'a'.repeat(32)+'/continuation').reply(continuationFixture());
+ await new Promise(setImmediate);
+ assert.equal(b.element('setupForm[type=submit]').disabled,false);
+ assert.match(b.element('continuationSetup').innerHTML,/第 <b>9<\/b> 局/);
+ assert.match(b.element('continuationSetup').innerHTML,/东席 3 座/);
+ assert.equal(b.element('resumeButton').hidden,true);
+ b.element('nameInput').value='续局房主';b.element('roomInput').value='';
+ const joining=b.element('setupForm').onsubmit({preventDefault(){},target:b.element('setupForm')});
+ const request=latest(b,'/api/session'),body=JSON.parse(request.options.body);
+ assert.equal(body.continue_from,'a'.repeat(32));assert.equal(body.mode,'pvp');assert.equal('config' in body,false);
+ request.reply({...lobby(),continuation:continuationFixture()});await joining;
+ assert.equal(b.element('lobbyOverlay').hidden,false);
+ assert.equal(b.element('continuationLobby').hidden,false);
+ assert.equal(b.get('continuationID'),null);
+ assert.equal(b.element('continuationSetup').hidden,true);
+ assert.equal(b.get('location.search'),'?room='+b.get('snap.room'));
+ const refreshed=browser(b.get('token'),JSON.parse(b.localStorage.getItem('tractor_resume')),b.get('location.search'));
+ assert.ok(latest(refreshed,'/api/state'));
+ assert.equal(latest(refreshed,'/api/history/'+'a'.repeat(32)+'/continuation'),undefined);
+});
+
+test('continuation lobby marks the first banker and historical names without occupying their seats',()=>{
+ const b=browser(),data=lobby();data.continuation=continuationFixture();sit(b,data);
+ const html=b.element('lobbySeats').innerHTML;
+ assert.match(html,/seat-choice east[^\"]*continuation-banker/);
+ assert.match(html,/续开首局庄家/);assert.match(html,/历史：&lt;旧玩家&gt;/);
+ assert.doesNotMatch(html,/<旧玩家>/);assert.equal(b.get('snap.seat'),null);
+ assert.match(b.element('continuationLobby').innerHTML,/必打级已获胜：2、5/);
+});
+
+test('an unavailable or failed continuation cannot silently start a fresh match',async()=>{
+ for(const response of [{available:false,message:'旧回放缺少比赛第一局'},{message:'读取失败'}]){
+  const b=browser(null,null,'?continue='+'b'.repeat(32));
+  latest(b,'/api/history/'+'b'.repeat(32)+'/continuation').reply(response);
+  await new Promise(setImmediate);
+  assert.equal(b.element('setupForm[type=submit]').disabled,true);
+  assert.equal(b.get('continuationSource'),null);
+  assert.equal(latest(b,'/api/session'),undefined);
+ }
+});
 
 test('blank or overlong nicknames do not join or disturb an existing session',async()=>{
  for(const name of ['', ' \t\u3000 ', 'x'.repeat(25)]){

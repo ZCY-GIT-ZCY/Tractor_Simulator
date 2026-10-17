@@ -42,7 +42,7 @@ function cardHTML(c,state,extra=''){
 function cardChips(cards){return cards.map(c=>`<span class="${red(c)?'red':''}">${cardName(c)}</span>`).join(' ');}
 function recordCard(meta){
  const r=meta.result,winning=r.winner?'金队':'青队',outcome=r.winner===r.banker%2?'守庄':'上台';
- return `<button class="history-card" data-record="${esc(meta.id)}" aria-label="回放打 ${label(meta.level)}，${esc(dateText(meta.finished_at))} ${esc(timeText(meta.finished_at))}"><div class="record-top"><span class="record-mode">${modes[meta.mode]||'牌桌对局'}</span><span class="record-time">${esc(timeText(meta.finished_at))}</span></div><div class="record-body"><div class="record-level"><span>打</span><strong>${label(meta.level)}</strong><small>${meta.trump?symbols[suits.indexOf(meta.trump)]:'无主'}</small></div><div class="record-outcome ${r.winner?'gold':''}"><strong>${r.score}<small> 分</small></strong>${winning}${outcome}</div></div><div class="record-players">${meta.players.map(p=>`<span>${p.seat%2?'◌':'•'} ${esc(p.name)}</span>`).join('')}</div><div class="record-footer"><span>${meta.tricks} 轮 · ${meta.steps} 步${meta.source==='imported-evaluation'?' · 评测导入':''}</span><b>回看这一局 ↗</b></div></button>`;
+ return `<article class="history-record"><button class="history-card" data-record="${esc(meta.id)}" aria-label="回放打 ${label(meta.level)}，${esc(dateText(meta.finished_at))} ${esc(timeText(meta.finished_at))}"><div class="record-top"><span class="record-mode">${modes[meta.mode]||'牌桌对局'}</span><span class="record-time">${esc(timeText(meta.finished_at))}</span></div><div class="record-body"><div class="record-level"><span>打</span><strong>${label(meta.level)}</strong><small>${meta.trump?symbols[suits.indexOf(meta.trump)]:'无主'}</small></div><div class="record-outcome ${r.winner?'gold':''}"><strong>${r.score}<small> 分</small></strong>${winning}${outcome}</div></div><div class="record-players">${meta.players.map(p=>`<span>${p.seat%2?'◌':'•'} ${esc(p.name)}</span>`).join('')}</div><div class="record-footer"><span>${meta.tricks} 轮 · ${meta.steps} 步${meta.source==='imported-evaluation'?' · 评测导入':''}</span><b>回看这一局 ↗</b></div></button><div class="record-continue">${r.match_winner!=null?'<span>整场比赛已结束</span>':`<a href="/?continue=${encodeURIComponent(meta.id)}">从结算续开 →</a>`}</div></article>`;
 }
 function renderLibrary(){
  const query=$('historySearch').value.trim().toLocaleLowerCase(),level=$('historyLevel').value;
@@ -198,6 +198,8 @@ async function openRecord(id){
   $('replayTitle').textContent='打 '+label(record.meta.level)+' · 第 '+record.meta.round+' 局';
   $('replayMeta').textContent=dateText(record.meta.finished_at)+' '+timeText(record.meta.finished_at)+' · '+record.meta.tricks+' 轮'+(record.meta.source==='imported-evaluation'?' · 已完成的 AI 评测对局':'');
   $('replayMode').textContent=modes[record.meta.mode]||'牌桌对局';
+  $('continueReplay').hidden=record.meta.result?.match_winner!=null;
+  $('continueReplay').href='/?continue='+encodeURIComponent(id);
   $('replayProgress').max=record.frames.length-1;
   for(const button of document.querySelectorAll('[data-seat]'))button.classList.toggle('active',button.dataset.seat===selectedSeat);
   buildTimeline();clock=new TractorReplayClock(record.frames.length,updatePlayback);updatePlayback();

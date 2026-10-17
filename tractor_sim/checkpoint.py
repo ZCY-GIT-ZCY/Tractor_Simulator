@@ -20,6 +20,7 @@ ROOM_FIELDS = (
     'next_bot_at', 'bidding_deadline', 'bidding_paused_at', 'ai_name', 'ai_id',
     'review_confirmations', 'review_ai_banker', 'trick_review_until', 'record_plays',
     'vacant_since', 'retired',
+    'continuation',
 )
 CLOCK_FIELDS = ('review_started', 'updated', 'next_bot_at',
                  'bidding_deadline', 'bidding_paused_at', 'trick_review_until', 'vacant_since')

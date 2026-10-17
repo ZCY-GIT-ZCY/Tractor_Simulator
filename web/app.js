@@ -28,9 +28,10 @@ let recordBusy=false,feedScope='',feedHTML='';
 const pageId=globalThis.crypto?.randomUUID?.()||'page_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
 let pageClosing=false;
 const invitedRoom=new URLSearchParams(location.search).get('room');
+let continuationID=new URLSearchParams(location.search).get('continue'),continuationSource=null,continuationPending=false;
 try{remembered=JSON.parse(localStorage.getItem('tractor_resume')||'null');}catch{}
 if(!remembered||typeof remembered.token!=='string'||typeof remembered.room!=='string')remembered=null;
-function updateResumeButton(){const available=remembered&&(!invitedRoom||remembered.room===invitedRoom);$('resumeButton').hidden=!available;$('resumeButton').textContent='回到上次牌桌'+(remembered?.mode==='pvp'?' · '+remembered.room:'');}
+function updateResumeButton(){const available=!continuationID&&remembered&&(!invitedRoom||remembered.room===invitedRoom);$('resumeButton').hidden=!available;$('resumeButton').textContent='回到上次牌桌'+(remembered?.mode==='pvp'?' · '+remembered.room:'');}
 function rememberSeat(){remembered={token,room:snap.room,mode:snap.mode,name:snap.name||nameOf(snap.seat)};try{localStorage.setItem('tractor_resume',JSON.stringify(remembered));}catch{}}
 function forgetSeat(sessionToken){if(remembered?.token===sessionToken)remembered=null;try{if(JSON.parse(localStorage.getItem('tractor_resume')||'null')?.token===sessionToken)localStorage.removeItem('tractor_resume');}catch{}updateResumeButton();}
 function sessionScope(){return {token,generation:pollGeneration};}
@@ -314,6 +315,9 @@ function renderLobby(){
  $('lobbyTitle').textContent=between&&!seated?'下一局，等你入座。':snap.started?'房间席位':'好牌，从入座开始。';
  $('lobbyCode').textContent=snap.room;
  $('lobbyConfig').textContent=snap.config.auction?'打 '+label(snap.config.initial_level)+' · 首局抢庄':`青队 ${label(snap.config.initial_level_a??snap.config.initial_level)} · 金队 ${label(snap.config.initial_level_b??snap.config.initial_level)} · ${seatDirections[snap.config.banker]}席坐庄`;
+ const continued=snap.continuation;
+ $('continuationLobby').hidden=!continued;
+ if(continued)$('continuationLobby').innerHTML=continuationHTML(continued)+`<p>下方“历史”仅供对照，选择座位不会自动认领原玩家。</p>`;
  if(seated)tentativeSeat=snap.seat;
  else if(tentativeSeat!=null&&!seatAvailable(tentativeSeat))tentativeSeat=null;
  const occupied=snap.players.filter(p=>p.occupied).length;
@@ -322,7 +326,8 @@ function renderLobby(){
   const mine=seated&&p.seat===snap.seat,chosen=p.seat===tentativeSeat;
   const disabled=seatBusy||!seatAvailable(p.seat)||seated;
   const aiControl=snap.host&&(!p.occupied||p.bot&&!snap.started);
-  return `<div class="seat-choice ${['south','west','north','east'][p.seat]} ${p.occupied?'occupied':''} ${mine?'mine':''} ${chosen?'chosen':''} ${p.bot?'ai-seat':''}"><button class="seat-pick" data-seat-pick="${p.seat}" aria-label="${seatDirections[p.seat]}席${p.occupied?' · '+esc(p.name):' · 空席'}" aria-pressed="${chosen}" ${disabled?'disabled':''}><span class="seat-direction">${seatDirections[p.seat]}<small>${p.seat} 座 · ${p.seat%2?'金队':'青队'}</small></span><strong>${p.occupied?esc(p.name):chosen?'等待你确认':'空席'}</strong><small>${mine?'你已确认':p.bot?open&&!seated?'可接替 AI · 点击选择':'本地 AI 策略':p.occupied?p.online?'已确认入座':'已确认 · 离线':'可以选择'}</small></button>${aiControl?`<button class="seat-ai-toggle" data-seat-ai="${p.seat}" data-enabled="${!p.bot}" ${seatBusy||!p.bot&&!seated?'disabled':''} aria-label="${seatDirections[p.seat]}席${p.bot?'移除':'添加'}AI">${p.bot?'移除 AI':'＋ AI 补位'}</button>`:''}</div>`;
+  const historical=continued?.previous_players?.find(old=>old.seat===p.seat);
+  return `<div class="seat-choice ${['south','west','north','east'][p.seat]} ${p.occupied?'occupied':''} ${mine?'mine':''} ${chosen?'chosen':''} ${p.bot?'ai-seat':''} ${continued?.next_banker===p.seat?'continuation-banker':''}"><button class="seat-pick" data-seat-pick="${p.seat}" aria-label="${seatDirections[p.seat]}席${p.occupied?' · '+esc(p.name):' · 空席'}" aria-pressed="${chosen}" ${disabled?'disabled':''}><span class="seat-direction">${seatDirections[p.seat]}<small>${p.seat} 座 · ${p.seat%2?'金队':'青队'}</small></span>${continued?.next_banker===p.seat?'<b class="continuation-seat-badge">续开首局庄家</b>':''}<strong>${p.occupied?esc(p.name):chosen?'等待你确认':'空席'}</strong><small>${mine?'你已确认':p.bot?open&&!seated?'可接替 AI · 点击选择':'本地 AI 策略':p.occupied?p.online?'已确认入座':'已确认 · 离线':'可以选择'}</small>${historical?`<small class="historical-seat" title="历史最后座次">历史：${esc(historical.name)}</small>`:''}</button>${aiControl?`<button class="seat-ai-toggle" data-seat-ai="${p.seat}" data-enabled="${!p.bot}" ${seatBusy||!p.bot&&!seated?'disabled':''} aria-label="${seatDirections[p.seat]}席${p.bot?'移除':'添加'}AI">${p.bot?'移除 AI':'＋ AI 补位'}</button>`:''}</div>`;
  }).join('')+'<div class="seat-compass"><span>对家同队</span><small>四席 · 一桌</small></div>';
  for(const button of $('lobbySeats').querySelectorAll('[data-seat-pick]'))button.onclick=()=>chooseSeat(Number(button.dataset.seatPick));
  for(const button of $('lobbySeats').querySelectorAll('[data-seat-ai]'))button.onclick=()=>roomAction('/api/room/ai',{seat:Number(button.dataset.seatAi),enabled:button.dataset.enabled==='true'});
@@ -509,8 +514,28 @@ function resetUI(){
  $('submitButton').disabled=true;$('submitButton').innerHTML='出牌 <span>↗</span>';validationUI('等待开局','选择玩法，开始你们的升级比赛');renderTeam('teamA',0);renderTeam('teamB',1);chooseMode(mode);
 }
 function updateBanker(){const team=Number($('teamInput').value);$('bankerInput').innerHTML=[team,team+2].map(s=>`<option value="${s}">${s} 座（${['南','西','北','东'][s]}）</option>`).join('');}
-function updateAuctionOptions(){const auction=$('auctionInput').checked;$('bankerOptions').hidden=auction;$('sharedLevelField').hidden=!auction;$('nameLevelRow').classList.toggle('single-field',!auction);}
-function chooseMode(value){mode=value;for(const b of document.querySelectorAll('[data-mode]'))b.classList.toggle('active',b.dataset.mode===mode);$('roomField').hidden=mode!=='pvp';$('humanSeatField').hidden=mode!=='pve';$('setupForm').querySelector('[type=submit]').innerHTML=(mode==='pvp'?'进入房间':'入座开牌')+' <span>→</span>';}
+function updateAuctionOptions(){const continuing=!!continuationID,auction=$('auctionInput').checked;$('bankerOptions').hidden=continuing||auction;$('sharedLevelField').hidden=continuing||!auction;$('auctionField').hidden=continuing;$('nameLevelRow').classList.toggle('single-field',continuing||!auction);}
+function chooseMode(value){mode=continuationID?'pvp':value;for(const b of document.querySelectorAll('[data-mode]'))b.classList.toggle('active',b.dataset.mode===mode);$('modeOptions').hidden=!!continuationID;$('roomField').hidden=mode!=='pvp'||!!continuationID;$('humanSeatField').hidden=mode!=='pve';$('setupForm').querySelector('[type=submit]').innerHTML=(continuationID?'创建续局房间':mode==='pvp'?'进入房间':'入座开牌')+' <span>→</span>';}
+function continuationHTML(c){
+ const wins=c.passed_levels.map(p=>p.filter(r=>mandatory.has(r)).map(label).join('、')||'暂无');
+ return `<div class="continuation-kicker">从第 ${c.source_round} 局结算续开</div><div class="continuation-levels"><span>青队<strong>${label(c.levels[0])}</strong><small>必打级已获胜：${wins[0]}</small></span><span>金队<strong>${label(c.levels[1])}</strong><small>必打级已获胜：${wins[1]}</small></span></div><p>续开第 <b>${c.next_round}</b> 局 · 打 <b>${label(c.next_level)}</b> · <b>${seatDirections[c.next_banker]}席 ${c.next_banker} 座</b>坐庄</p>${c.mandatory_corrected?'<p class="continuation-correction">旧记录已按“必打级须坐庄获胜”校正升级进度。</p>':''}`;
+}
+async function loadContinuation(){
+ const id=continuationID,button=$('setupForm').querySelector('[type=submit]');continuationPending=true;button.disabled=true;
+ $('setupTitle').textContent='接着上次，继续打。';$('continuationSetup').hidden=false;$('continuationSetup').textContent='正在核对历史结算与必打进度…';
+ try{
+  const data=await api('/api/history/'+encodeURIComponent(id)+'/continuation');if(id!==continuationID)return;
+  if(!data.available)throw new Error(data.message||'这份记录无法续开');
+  continuationSource=data;$('continuationSetup').innerHTML=continuationHTML(data)+'<p>重新洗牌；进入后确认座位，可邀请牌友或用 AI 补齐。</p>';
+ }catch(error){if(id!==continuationID)return;continuationSource=null;$('continuationSetup').innerHTML=`<p>${esc(error.message)}</p><p><a href="/history.html">重新选择历史记录 →</a> · <a href="/">新开比赛</a></p>`;}
+ finally{if(id===continuationID){continuationPending=false;button.disabled=!continuationSource;}}
+}
+function finishContinuationSetup(room){
+ if(!continuationID)return;
+ history.replaceState(null,'','/?room='+encodeURIComponent(room));
+ continuationID=null;continuationSource=null;$('continuationSetup').hidden=true;
+ $('setupTitle').textContent='选择你的牌桌';updateAuctionOptions();chooseMode(mode);
+}
 const levelOptions=Array.from({length:13},(_,i)=>`<option value="${i+2}">${label(i+2)}</option>`).join('');
 for(const id of ['levelInput','levelAInput','levelBInput'])$(id).innerHTML=levelOptions;
 $('levelInput').onchange=()=>{$('levelAInput').value=$('levelBInput').value=$('levelInput').value;};
@@ -522,11 +547,12 @@ $('setupForm').onsubmit=async e=>{
  e.preventDefault();if(e.target.querySelector('[type=submit]').disabled)return;$('setupError').textContent='';
  const name=$('nameInput').value.trim();
  if(!name||name.length>24){$('setupError').textContent=!name?'请输入你的昵称':'昵称最多 24 个字符';$('nameInput').focus();return;}
+ if(continuationID&&(!continuationSource||continuationPending)){$('setupError').textContent='请等待历史进度核对完成';return;}
  const config={initial_level:Number($('levelInput').value),auction:$('auctionInput').checked,banker:Number($('bankerInput').value)};
  if(!config.auction){config.initial_level_a=Number($('levelAInput').value);config.initial_level_b=Number($('levelBInput').value);}
  const button=e.target.querySelector('[type=submit]');button.disabled=true;
  pollGeneration++;const scope=sessionScope();
- try{const data=await api('/api/session',{mode,name,room:$('roomInput').value,seat:Number($('humanSeatInput').value),config});if(!currentSession(scope))return;token=data.token;sessionStorage.setItem('tractor_session',token);snap=null;closedResult=null;acceptSnapshot(data);rememberSeat();$('resumeButton').hidden=true;poll(++pollGeneration);}
+ try{const data=await api('/api/session',{mode,name,room:$('roomInput').value,seat:Number($('humanSeatInput').value),...(continuationID?{continue_from:continuationID}:{config})});if(!currentSession(scope))return;token=data.token;sessionStorage.setItem('tractor_session',token);snap=null;closedResult=null;acceptSnapshot(data);rememberSeat();finishContinuationSetup(data.room);$('resumeButton').hidden=true;poll(++pollGeneration);}
  catch(err){if(currentSession(scope)){$('setupError').textContent=err.message;button.disabled=false;if(token)poll(++pollGeneration);}}finally{button.disabled=false;}
 };
 $('clearButton').onclick=()=>{selected.clear();syncSelection();validateSelection();};
@@ -578,7 +604,8 @@ if(typeof ResizeObserver==='function')new ResizeObserver(()=>{if(snap?.started&&
 renderTeam('teamA',0);renderTeam('teamB',1);
 renderNavigation();
 api('/api/site').then(site=>publicURL=site.public_url||'').catch(()=>{});
-if(invitedRoom&&/^[A-Za-z0-9_-]{3,24}$/.test(invitedRoom)){$('roomInput').value=invitedRoom;chooseMode('pvp');$('inviteNotice').textContent='你收到房间 '+invitedRoom+' 的邀请，填写名字并确认座位即可入座。';$('inviteNotice').hidden=false;if(remembered?.room!==invitedRoom)token=null;}
+if(continuationID){token=null;chooseMode('pvp');updateAuctionOptions();loadContinuation();}
+else if(invitedRoom&&/^[A-Za-z0-9_-]{3,24}$/.test(invitedRoom)){$('roomInput').value=invitedRoom;chooseMode('pvp');$('inviteNotice').textContent='你收到房间 '+invitedRoom+' 的邀请，填写名字并确认座位即可入座。';$('inviteNotice').hidden=false;if(remembered?.room!==invitedRoom)token=null;}
 else if(!['localhost','127.0.0.1','::1'].includes(location.hostname))chooseMode('pvp');
-if(remembered&&(!invitedRoom||remembered.room===invitedRoom)){$('resumeButton').hidden=false;$('resumeButton').textContent='回到上次牌桌'+(remembered.mode==='pvp'?' · '+remembered.room:'');}
+if(!continuationID&&remembered&&(!invitedRoom||remembered.room===invitedRoom)){$('resumeButton').hidden=false;$('resumeButton').textContent='回到上次牌桌'+(remembered.mode==='pvp'?' · '+remembered.room:'');}
 if(token){const scope=sessionScope();api('/api/state').then(data=>{if(!currentSession(scope))return;acceptSnapshot(data);rememberSeat();poll(++pollGeneration);}).catch(e=>{if(!currentSession(scope))return;if(e.code==='SESSION')forgetSeat(scope.token);resetUI();if(e.code!=='SESSION')toast('暂时无法重连，可点击回到上次牌桌');});}
