@@ -84,6 +84,38 @@ test('new admissions submit the explicitly entered nickname without surrounding 
  assert.equal(b.get('token'),'token_one');assert.equal(b.element('setupOverlay').hidden,true);
 });
 
+test('turning off the opening auction exposes separate team levels and preserves the chosen values',()=>{
+ const b=browser();assert.equal(b.element('bankerOptions').hidden,true);
+ assert.equal(b.element('sharedLevelField').hidden,false);
+ b.element('levelInput').value='8';b.element('levelInput').onchange();
+ b.element('auctionInput').checked=false;b.element('auctionInput').onchange();
+ assert.equal(b.element('sharedLevelField').hidden,true);assert.equal(b.element('bankerOptions').hidden,false);
+ assert.equal(b.element('levelAInput').value,'8');assert.equal(b.element('levelBInput').value,'8');
+ b.element('levelBInput').value='2';
+ b.element('auctionInput').checked=true;b.element('auctionInput').onchange();
+ b.element('auctionInput').checked=false;b.element('auctionInput').onchange();
+ assert.equal(b.element('levelAInput').value,'8');assert.equal(b.element('levelBInput').value,'2');
+});
+
+test('admission submits separate team levels only for a fixed banker',async()=>{
+ for(const auction of [false,true]){
+  const b=browser();b.element('nameInput').value='等级测试';b.element('auctionInput').checked=auction;
+  b.element('levelInput').value='6';b.element('levelAInput').value='8';b.element('levelBInput').value='2';b.element('bankerInput').value='3';
+  const joining=b.element('setupForm').onsubmit({preventDefault(){},target:b.element('setupForm')});
+  const request=latest(b,'/api/session'),config=JSON.parse(request.options.body).config;
+  assert.equal(config.auction,auction);assert.equal(config.banker,3);
+  if(auction){assert.equal(config.initial_level,6);assert.equal('initial_level_a' in config,false);assert.equal('initial_level_b' in config,false);}
+  else{assert.equal(config.initial_level_a,8);assert.equal(config.initial_level_b,2);}
+  request.reply(snapshot());await joining;
+ }
+});
+
+test('the room lobby displays both team levels instead of the common fallback',()=>{
+ const b=browser(),data=snapshot();data.started=false;data.state=null;
+ data.config={initial_level:2,auction:false,banker:3,initial_level_a:8,initial_level_b:2};sit(b,data);
+ assert.equal(b.element('lobbyConfig').textContent,'青队 8 · 金队 2 · 东席坐庄');
+});
+
 test('a remembered seat offers token-based resume without prefilling a new nickname',async()=>{
  const b=browser(null,{token:'token_one',room:'room_one',mode:'pvp',name:'牌友'});
  assert.equal(b.element('nameInput').value,'');

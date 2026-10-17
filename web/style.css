@@ -122,3 +122,7 @@ button,.full-hand .card { touch-action:manipulation; }
 .player-heading .player-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .player-heading .banker-badge { flex-shrink:0; margin-left:0; }
 @media(max-width:760px) { .validation small { max-width:200px; } }
+
+/* The common rank is replaced by two team ranks outside the opening auction. */
+.form-row.single-field{grid-template-columns:minmax(0,1fr)}
+@media(min-width:761px){.setup-dialog{max-height:calc(100dvh - 40px);overflow:auto}}

@@ -20,6 +20,8 @@ class GameConfig:
     initial_level: int = 2
     auction: bool = True
     banker: int = 0
+    initial_level_a: int | None = None
+    initial_level_b: int | None = None
 
     def __post_init__(self):
         if type(self.initial_level) is not int or self.initial_level not in range(2, 15):
@@ -28,6 +30,16 @@ class GameConfig:
             raise ValueError("庄家座位须为 0..3")
         if type(self.auction) is not bool:
             raise ValueError("auction 须为布尔值")
+        for name, level in (("青队", self.initial_level_a), ("金队", self.initial_level_b)):
+            if level is not None and (type(level) is not int or level not in range(2, 15)):
+                raise ValueError(name + "初始等级须为 2 至 A（数字 2..14）")
+        if self.auction and (self.initial_level_a is not None or self.initial_level_b is not None):
+            raise ValueError("首局抢庄须使用统一初始等级；请关闭抢庄后分别设置两队等级")
+
+    @property
+    def starting_levels(self):
+        return [self.initial_level if level is None else level
+                for level in (self.initial_level_a, self.initial_level_b)]
 
 
 @dataclass
@@ -48,7 +60,7 @@ class TractorEnv:
         self.seed = seed
         self.rng = random.Random(seed)
         self.turn_direction = -1  # Fixed seats: south 0 -> east 3 -> north 2 -> west 1.
-        self.levels = [self.config.initial_level] * 2
+        self.levels = self.config.starting_levels
         # Only a won defending hand earns credit; choosing an initial
         # level never invents defending history for either partnership.
         self.passed = [set(), set()]
@@ -515,7 +527,7 @@ class TractorEnv:
     def _migrate_mandatory_wins(self):
         """Rebuild old completion credit from the full public match results."""
         self.passed = [set(), set()]
-        floors = [self.config.initial_level] * 2
+        floors = self.config.starting_levels
         for event in self.events:
             if event['type'] != 'round_ended':
                 continue

@@ -313,7 +313,7 @@ function renderLobby(){
  const open=snap.seat_selection_open??!snap.started,between=!!snap.between_rounds;
  $('lobbyTitle').textContent=between&&!seated?'下一局，等你入座。':snap.started?'房间席位':'好牌，从入座开始。';
  $('lobbyCode').textContent=snap.room;
- $('lobbyConfig').textContent='打 '+label(snap.config.initial_level)+(snap.config.auction?' · 首局抢庄':' · '+seatDirections[snap.config.banker]+'席坐庄');
+ $('lobbyConfig').textContent=snap.config.auction?'打 '+label(snap.config.initial_level)+' · 首局抢庄':`青队 ${label(snap.config.initial_level_a??snap.config.initial_level)} · 金队 ${label(snap.config.initial_level_b??snap.config.initial_level)} · ${seatDirections[snap.config.banker]}席坐庄`;
  if(seated)tentativeSeat=snap.seat;
  else if(tentativeSeat!=null&&!seatAvailable(tentativeSeat))tentativeSeat=null;
  const occupied=snap.players.filter(p=>p.occupied).length;
@@ -509,18 +509,24 @@ function resetUI(){
  $('submitButton').disabled=true;$('submitButton').innerHTML='出牌 <span>↗</span>';validationUI('等待开局','选择玩法，开始你们的升级比赛');renderTeam('teamA',0);renderTeam('teamB',1);chooseMode(mode);
 }
 function updateBanker(){const team=Number($('teamInput').value);$('bankerInput').innerHTML=[team,team+2].map(s=>`<option value="${s}">${s} 座（${['南','西','北','东'][s]}）</option>`).join('');}
+function updateAuctionOptions(){const auction=$('auctionInput').checked;$('bankerOptions').hidden=auction;$('sharedLevelField').hidden=!auction;$('nameLevelRow').classList.toggle('single-field',!auction);}
 function chooseMode(value){mode=value;for(const b of document.querySelectorAll('[data-mode]'))b.classList.toggle('active',b.dataset.mode===mode);$('roomField').hidden=mode!=='pvp';$('humanSeatField').hidden=mode!=='pve';$('setupForm').querySelector('[type=submit]').innerHTML=(mode==='pvp'?'进入房间':'入座开牌')+' <span>→</span>';}
-$('levelInput').innerHTML=Array.from({length:13},(_,i)=>`<option value="${i+2}">${label(i+2)}</option>`).join('');updateBanker();
+const levelOptions=Array.from({length:13},(_,i)=>`<option value="${i+2}">${label(i+2)}</option>`).join('');
+for(const id of ['levelInput','levelAInput','levelBInput'])$(id).innerHTML=levelOptions;
+$('levelInput').onchange=()=>{$('levelAInput').value=$('levelBInput').value=$('levelInput').value;};
+updateBanker();updateAuctionOptions();
 for(const b of document.querySelectorAll('[data-mode]'))b.onclick=()=>chooseMode(b.dataset.mode);
-$('auctionInput').onchange=()=>$('bankerOptions').hidden=$('auctionInput').checked;
+$('auctionInput').onchange=updateAuctionOptions;
 $('teamInput').onchange=updateBanker;
 $('setupForm').onsubmit=async e=>{
  e.preventDefault();if(e.target.querySelector('[type=submit]').disabled)return;$('setupError').textContent='';
  const name=$('nameInput').value.trim();
  if(!name||name.length>24){$('setupError').textContent=!name?'请输入你的昵称':'昵称最多 24 个字符';$('nameInput').focus();return;}
+ const config={initial_level:Number($('levelInput').value),auction:$('auctionInput').checked,banker:Number($('bankerInput').value)};
+ if(!config.auction){config.initial_level_a=Number($('levelAInput').value);config.initial_level_b=Number($('levelBInput').value);}
  const button=e.target.querySelector('[type=submit]');button.disabled=true;
  pollGeneration++;const scope=sessionScope();
- try{const data=await api('/api/session',{mode,name,room:$('roomInput').value,seat:Number($('humanSeatInput').value),config:{initial_level:Number($('levelInput').value),auction:$('auctionInput').checked,banker:Number($('bankerInput').value)}});if(!currentSession(scope))return;token=data.token;sessionStorage.setItem('tractor_session',token);snap=null;closedResult=null;acceptSnapshot(data);rememberSeat();$('resumeButton').hidden=true;poll(++pollGeneration);}
+ try{const data=await api('/api/session',{mode,name,room:$('roomInput').value,seat:Number($('humanSeatInput').value),config});if(!currentSession(scope))return;token=data.token;sessionStorage.setItem('tractor_session',token);snap=null;closedResult=null;acceptSnapshot(data);rememberSeat();$('resumeButton').hidden=true;poll(++pollGeneration);}
  catch(err){if(currentSession(scope)){$('setupError').textContent=err.message;button.disabled=false;if(token)poll(++pollGeneration);}}finally{button.disabled=false;}
 };
 $('clearButton').onclick=()=>{selected.clear();syncSelection();validateSelection();};

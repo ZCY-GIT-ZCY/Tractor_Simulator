@@ -16,7 +16,9 @@
 
 ## 环境 API
 
-`TractorEnv(config=None, seed=None)`：GameConfig 或配置 dict；初始化即 reset。config 字段：`initial_level` 默认 2，`auction` 默认 true，`banker` 默认 0。初始等级共同适用于两队。
+`TractorEnv(config=None, seed=None)`：GameConfig 或配置 dict；初始化即 reset。config 字段：`initial_level` 默认 2，`auction` 默认 true，`banker` 默认 0。非抢庄时可额外设置 `initial_level_a`（青队 0/2 座）、`initial_level_b`（金队 1/3 座），各为整数 2..14，省略或 null 时该队沿用 `initial_level`。抢庄时这两个字段须省略或为 null，双方统一使用 `initial_level`；否则请求返回 400。首局和后续各局均以实际庄家方的等级为级牌，不因另一个队的等级改变。旧版共同等级配置、checkpoint 与回放继续兼容。
+
+例如 `{ "auction": false, "banker": 3, "initial_level_a": 8, "initial_level_b": 2 }` 表示青队从 8、金队从 2 开始，东席 3 坐庄，第一局打 2。两队完成记录均为空，设置起点不等于在该级坐庄获胜。
 
 | 方法 / 属性 | 含义 |
 |---|---|

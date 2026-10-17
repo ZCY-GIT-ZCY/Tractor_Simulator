@@ -70,6 +70,29 @@ class RoomAPI(unittest.TestCase):
                 self.assertEqual(reconnected['name'], name.strip())
                 self.assertEqual(self.request('/api/leave', {}, session['token'])[0], 200)
 
+    def test_separate_initial_levels_are_shared_by_the_room_and_select_the_bankers_level(self):
+        config={'auction':False,'banker':3,'initial_level_a':8,'initial_level_b':2}
+        status, host=self.request('/api/session',{'mode':'pvp','name':'房主','room':'separate_levels','config':config})
+        self.assertEqual(status,200)
+        status, guest=self.request('/api/session',{'mode':'pvp','name':'来宾','room':host['room'],
+            'config':{'auction':False,'initial_level_a':5,'initial_level_b':10}})
+        self.assertEqual(status,200);self.assertEqual(guest['config'],host['config'])
+        self.assertEqual(self.request('/api/seat/confirm',{'seat':0},host['token'])[0],200)
+        self.assertEqual(self.request('/api/seat/confirm',{'seat':2},guest['token'])[0],200)
+        self.assertEqual(self.request('/api/room/ai',{'enabled':True},host['token'])[0],200)
+        status, started=self.request('/api/room/start',{},host['token'])
+        self.assertEqual(status,200)
+        self.assertEqual((started['state']['levels'],started['state']['level']),([8,2],2))
+        self.assertEqual(started['state']['passed_levels'],[[],[]])
+
+    def test_bad_independent_level_config_does_not_create_a_session(self):
+        before=set(self.server.registry.tokens)
+        for config in ({'auction':True,'initial_level_a':2}, {'auction':False,'initial_level_b':True},
+                       {'auction':False,'initial_level_a':15}):
+            status,error=self.request('/api/session',{'mode':'self','name':'配置测试','config':config})
+            self.assertEqual(status,400);self.assertIn('等级',error['message'])
+        self.assertEqual(set(self.server.registry.tokens),before)
+
     def test_four_confirmed_seats_host_start_and_privacy(self):
         clients=[]
         for i in range(4):
